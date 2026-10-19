@@ -87,6 +87,15 @@ table.res th:first-child,table.res td:first-child{text-align:left}
 table.res tr:last-child td{border-bottom:2px solid var(--text)}
 table.res .sub{font-weight:400;font-size:11px;color:var(--muted)}
 td.sig{color:var(--sig);font-weight:600}
+td.hi{font-weight:700}
+table.data tr.off td:not(.rn){opacity:.35}
+.filterbar{display:flex;align-items:center;gap:8px;margin:-4px 0 10px;padding:6px 10px;border-radius:7px;background:var(--accent-soft);color:var(--accent);font-size:13px}
+.filterbar[hidden]{display:none}
+.filterbar code,.card code,dialog code{font-family:ui-monospace,monospace;font-size:12px}
+.card>header button.copy{padding:2px 9px;font-size:12px}
+button:disabled{opacity:.45;cursor:default}
+button:disabled:hover{border-color:var(--border)}
+.sep{width:1px;align-self:stretch;background:var(--border);margin:0 2px}
 table.corr td{text-align:center;line-height:1.2}
 table.corr td small{display:block;color:var(--muted);font-size:10.5px}
 .note{color:var(--muted);font-size:12.5px;margin:4px 0}
@@ -134,7 +143,7 @@ textarea.paste{width:100%;min-height:200px;font-family:ui-monospace,monospace;fo
   .top{gap:8px;flex-wrap:wrap}
 }
 @media print{
-  .top,.side,.toolbar,#tab-data,.card .x{display:none!important}
+  .top,.side,.toolbar,#tab-data,.card .x,.card .copy{display:none!important}
   .app{display:block}
   #tab-results{display:block!important}
   .card{break-inside:avoid;box-shadow:none}
@@ -160,14 +169,21 @@ textarea.paste{width:100%;min-height:200px;font-family:ui-monospace,monospace;fo
         <button id="bImport">Import CSV…</button>
         <button id="bPaste">Paste data…</button>
         <button id="bSample">Sample data</button>
+        <span class="sep"></span>
+        <button id="bUndo" title="Undo (Ctrl+Z)" disabled>↶ Undo</button>
         <button id="bAddRow">+ Row</button>
         <button id="bAddCol">+ Column</button>
-        <button id="bCompute">Compute column…</button>
+        <button id="bCompute">Compute…</button>
+        <button id="bRecode">Recode…</button>
+        <button id="bSort">Sort…</button>
+        <button id="bFilter">Filter…</button>
+        <span class="sep"></span>
         <button id="bExport">Export CSV</button>
         <button id="bClear" class="danger">Clear</button>
         <span class="info" id="dataInfo"></span>
         <input type="file" id="file" accept=".csv,.tsv,.txt,text/csv" hidden>
       </div>
+      <div class="filterbar" id="filterBar" hidden>Filter active: <code id="filterExpr"></code><span id="filterN"></span><span class="spacer"></span><button id="bFilterOff">Remove filter</button></div>
       <div class="tablewrap" id="tableWrap"></div>
     </section>
     <section id="tab-results" hidden>
@@ -279,6 +295,112 @@ function holm(ps){
   const m=ps.length, idx=ps.map((p,i)=>i).sort((a,b)=>ps[a]-ps[b]), out=new Array(m); let run=0;
   idx.forEach((i,r)=>{ run=Math.max(run, Math.min(1,(m-r)*ps[i])); out[i]=run; });
   return out;
+}
+function bisect(fn, target, lo, hi, it=100){ // fn increasing
+  for (let i=0;i<it;i++){ const m=(lo+hi)/2; if (fn(m)<target) lo=m; else hi=m; }
+  return (lo+hi)/2;
+}
+const chiInv = (p,k) => bisect(x=>1-chiUpper(x,k), p, 0, k+60*Math.sqrt(2*k)+200);
+const betaInv = (p,a,b) => bisect(x=>ibeta(x,a,b), p, 0, 1, 60);
+const dbinom = (k,n,p) => Math.exp(lchoose(n,k)+(k?k*Math.log(p):0)+(n-k?(n-k)*Math.log(1-p):0));
+function erfcFast(x){ // Numerical Recipes erfcc, |rel err| < 1.2e-7
+  const z=Math.abs(x), t=1/(1+0.5*z);
+  const r=t*Math.exp(-z*z-1.26551223+t*(1.00002368+t*(0.37409196+t*(0.09678418+t*(-0.18628806+t*(0.27886807+t*(-1.13520398+t*(1.48851587+t*(-0.82215223+t*0.17087277)))))))));
+  return x>=0?r:2-r;
+}
+const PhiF = z => 0.5*erfcFast(-z/Math.SQRT2);
+function simpson(fn,a,b,n){ if (n%2) n++; const h=(b-a)/n; let s=fn(a)+fn(b); for (let i=1;i<n;i++) s+=(i%2?4:2)*fn(a+i*h); return s*h/3; }
+const SB=new Map();
+function sIntegral(df, g, n=64){ // E[g(s)] where s = sqrt(chi²_df / df)
+  if (!Number.isFinite(df) || df>2e4) return g(1);
+  const lc=Math.log(2)+(df/2)*Math.log(df/2)-lgamma(df/2);
+  if (!SB.has(df)) SB.set(df,[Math.sqrt(chiInv(1e-10,df)/df), Math.sqrt(chiInv(1-1e-10,df)/df)]);
+  const [lo,hi]=SB.get(df);
+  return simpson(s=>s<=0?0:Math.exp(lc+(df-1)*Math.log(s)-df*s*s/2)*g(s), lo, hi, n);
+}
+function wprob(w,k){ // P(range of k iid N(0,1) < w)
+  if (w<=0) return 0; if (w>30) return 1;
+  return Math.min(1, k*simpson(z=>normPdf(z)*Math.pow(Math.max(0,PhiF(z)-PhiF(z-w)),k-1), -7.5, 7.5, 120));
+}
+const ptukey = (q,k,df) => q<=0 ? 0 : Math.min(1, sIntegral(df, s=>wprob(q*s,k), df<10?240:64));
+function qtukey(p,k,df){ let hi=10; while (ptukey(hi,k,df)<p && hi<1e4) hi*=2; return bisect(q=>ptukey(q,k,df), p, 0, hi, 36); }
+const nctcdf = (t,df,delta) => sIntegral(df, s=>PhiF(t*s-delta), 200);
+function kendall(x,y){ // tau-b with tie-corrected asymptotic variance
+  const n=x.length; let C=0, Dd=0, tx=0, ty=0;
+  for (let i=0;i<n;i++) for (let j=i+1;j<n;j++){
+    const a=Math.sign(x[i]-x[j]), b=Math.sign(y[i]-y[j]);
+    if (a===0) tx++; if (b===0) ty++;
+    if (a&&b){ if (a===b) C++; else Dd++; }
+  }
+  const n0=n*(n-1)/2, tau=(C-Dd)/Math.sqrt((n0-tx)*(n0-ty));
+  const grp=a=>{ const m=new Map(); a.forEach(v=>m.set(v,(m.get(v)||0)+1)); return [...m.values()].filter(t=>t>1); };
+  const gx=grp(x), gy=grp(y), S=(g,fn)=>sum(g.map(fn));
+  const v=(n*(n-1)*(2*n+5)-S(gx,t=>t*(t-1)*(2*t+5))-S(gy,t=>t*(t-1)*(2*t+5)))/18
+    + S(gx,t=>t*(t-1))*S(gy,t=>t*(t-1))/(2*n*(n-1))
+    + S(gx,t=>t*(t-1)*(t-2))*S(gy,t=>t*(t-1)*(t-2))/(9*n*(n-1)*(n-2));
+  const z=(C-Dd)/Math.sqrt(v);
+  return {r:tau, z, p:pZ(z,'two')};
+}
+function jacobiEig(S){ // symmetric matrix → eigenvalues (desc) and eigenvectors (columns)
+  const n=S.length, a=S.map(r=>r.slice()), V=a.map((r,i)=>r.map((_,j)=>i===j?1:0));
+  for (let sweep=0; sweep<100; sweep++){
+    let off=0; for (let p=0;p<n;p++) for (let q=p+1;q<n;q++) off+=a[p][q]**2;
+    if (off<1e-24) break;
+    for (let p=0;p<n;p++) for (let q=p+1;q<n;q++){
+      if (Math.abs(a[p][q])<1e-300) continue;
+      const th=(a[q][q]-a[p][p])/(2*a[p][q]), t=(th>=0?1:-1)/(Math.abs(th)+Math.sqrt(th*th+1)), c=1/Math.sqrt(t*t+1), s=t*c;
+      for (let k=0;k<n;k++){ const x=a[k][p], y=a[k][q]; a[k][p]=c*x-s*y; a[k][q]=s*x+c*y; }
+      for (let k=0;k<n;k++){ const x=a[p][k], y=a[q][k]; a[p][k]=c*x-s*y; a[q][k]=s*x+c*y; }
+      for (let k=0;k<n;k++){ const x=V[k][p], y=V[k][q]; V[k][p]=c*x-s*y; V[k][q]=s*x+c*y; }
+    }
+  }
+  const ord=a.map((_,i)=>i).sort((i,j)=>a[j][j]-a[i][i]);
+  return {values:ord.map(i=>a[i][i]), vectors:V.map(r=>ord.map(i=>r[i]))};
+}
+function varimax(L){ // Kaiser-normalized varimax rotation of loadings (rows = variables)
+  const p=L.length, m=L[0].length; if (m<2) return L;
+  const h=L.map(r=>Math.sqrt(sum(r.map(v=>v*v)))||1), A=L.map((r,i)=>r.map(v=>v/h[i]));
+  for (let it=0; it<200; it++){
+    let mx=0;
+    for (let j=0;j<m;j++) for (let k=j+1;k<m;k++){
+      let a=0,b=0,c=0,d=0;
+      for (let i=0;i<p;i++){ const x=A[i][j], y=A[i][k], u=x*x-y*y, v=2*x*y; a+=u; b+=v; c+=u*u-v*v; d+=2*u*v; }
+      const phi=Math.atan2(d-2*a*b/p, c-(a*a-b*b)/p)/4; mx=Math.max(mx,Math.abs(phi));
+      if (Math.abs(phi)<1e-12) continue;
+      const cs=Math.cos(phi), sn=Math.sin(phi);
+      for (let i=0;i<p;i++){ const x=A[i][j], y=A[i][k]; A[i][j]=x*cs+y*sn; A[i][k]=-x*sn+y*cs; }
+    }
+    if (mx<1e-9) break;
+  }
+  return A.map((r,i)=>r.map(v=>v*h[i]));
+}
+function det(M){
+  const n=M.length, A=M.map(r=>r.slice()); let d=1;
+  for (let c=0;c<n;c++){
+    let piv=c; for (let r=c+1;r<n;r++) if (Math.abs(A[r][c])>Math.abs(A[piv][c])) piv=r;
+    if (A[piv][c]===0) return 0;
+    if (piv!==c){ [A[c],A[piv]]=[A[piv],A[c]]; d=-d; }
+    d*=A[c][c];
+    for (let r=c+1;r<n;r++){ const fct=A[r][c]/A[c][c]; for (let j=c;j<n;j++) A[r][j]-=fct*A[c][j]; }
+  }
+  return d;
+}
+function logitFit(X,y){ // Newton–Raphson / IRLS
+  const n=X.length, p=X[0].length, dot=(r,b)=>r.reduce((s,v,i)=>s+v*b[i],0);
+  let b=new Array(p).fill(0), inv=null, conv=false, it=0;
+  const probs=b=>X.map(r=>{ const e=dot(r,b); return 1/(1+Math.exp(-e)); });
+  for (; it<100; it++){
+    const pr=probs(b), H=Array.from({length:p},()=>new Array(p).fill(0)), g=new Array(p).fill(0);
+    for (let i=0;i<n;i++){ const w=pr[i]*(1-pr[i]), r=X[i]; for (let a=0;a<p;a++){ g[a]+=r[a]*(y[i]-pr[i]); for (let c=0;c<p;c++) H[a][c]+=w*r[a]*r[c]; } }
+    inv=matInv(H); if (!inv) return null;
+    const step=inv.map(row=>dot(row,g)); b=b.map((v,i)=>v+step[i]);
+    if (Math.max(...step.map(Math.abs))<1e-10){ conv=true; break; }
+  }
+  const pr=probs(b), H=Array.from({length:p},()=>new Array(p).fill(0));
+  for (let i=0;i<n;i++){ const w=pr[i]*(1-pr[i]); for (let a=0;a<p;a++) for (let c=0;c<p;c++) H[a][c]+=w*X[i][a]*X[i][c]; }
+  inv=matInv(H) || inv;
+  const cl=v=>Math.min(1-1e-15,Math.max(1e-15,v)), ll=sum(pr.map((q,i)=>y[i]?Math.log(cl(q)):Math.log(cl(1-q))));
+  return {b, inv, pr, ll, conv, it};
 }
 
 /* ================= Basic statistics ================= */
@@ -416,8 +538,30 @@ const MISS = /^(|na|n\/a|nan|null|\.)$/i;
 const isMiss = v => v==null || MISS.test(String(v).trim());
 const toNum = v => isMiss(v) ? NaN : Number(String(v).trim());
 function colIsNum(j){ let any=false; for (const r of D.rows){ const v=r[j]; if (isMiss(v)) continue; if (!Number.isFinite(Number(String(v).trim()))) return false; any=true; } return any; }
-const numCol = j => D.rows.map(r=>toNum(r[j]));
-const strCol = j => D.rows.map(r=>isMiss(r[j])?null:String(r[j]).trim());
+let MASK=null; // row filter (boolean per row) or null
+const AR = () => MASK ? D.rows.filter((_,i)=>MASK[i]) : D.rows; // active rows
+const numCol = j => AR().map(r=>toNum(r[j]));
+const strCol = j => AR().map(r=>isMiss(r[j])?null:String(r[j]).trim());
+const RESERVED=new Set('break case catch class const continue debugger default delete do else enum export extends false finally for function if import in instanceof let new null return super switch this throw true try typeof var void while with yield'.split(' '));
+function exprIds(){
+  const seen=new Set();
+  return D.cols.map(c=>{ let id=c.replace(/\W+/g,'_').replace(/^(\d)/,'_$1')||'_'; if (RESERVED.has(id)) id+='_'; let b=id, i=2; while (seen.has(id)) id=`${b}_${i++}`; seen.add(id); return id; });
+}
+function compileExpr(ex){ // returns row => value; columns are exposed as variables
+  const ids=exprIds();
+  let fn; try { fn=new Function('M','v',`with(M){ const [${ids.join(',')}]=v; return (${ex}); }`); } catch(e){ throw new Error('Syntax error: '+e.message); }
+  const nums=D.cols.map((_,j)=>colIsNum(j)), M=Object.create(null);
+  for (const k of Object.getOwnPropertyNames(Math)) M[k]=Math[k];
+  M.ln=Math.log; M.isNA=v=>v==null||Number.isNaN(v);
+  return r=>{ try { return fn(M, r.map((x,j)=>nums[j]?toNum(x):(isMiss(x)?null:String(x).trim()))); } catch(e){ throw new Error('Error evaluating expression: '+e.message); } };
+}
+function computeMask(){
+  MASK=null; if (!D.filter) return;
+  try { const fn=compileExpr(D.filter); MASK=D.rows.map(r=>!!fn(r)); } catch { MASK=null; }
+}
+const UNDO=[];
+function snap(){ UNDO.push(JSON.stringify(D)); if (UNDO.length>25) UNDO.shift(); $('#bUndo').disabled=false; }
+function undo(){ if (!UNDO.length) return; D=JSON.parse(UNDO.pop()); dataChanged(true); $('#bUndo').disabled=!UNDO.length; }
 const finite = j => numCol(j).filter(Number.isFinite);
 const cname = j => esc(D.cols[j]);
 function sortLevels(lv){
@@ -452,6 +596,7 @@ function loadTable(rows, header=true){
   if (!rows.length) return;
   const w=Math.max(...rows.map(r=>r.length));
   const head=header ? rows.shift() : [];
+  if (D.cols.length) snap();
   D={cols:[], rows:[]};
   for (let j=0;j<w;j++) D.cols.push(uniqueName((head[j]||'').trim()||`V${j+1}`));
   D.rows=rows.map(r=>Array.from({length:w},(_,j)=>(r[j]??'').trim()));
@@ -479,7 +624,10 @@ function sampleData(){
 const MAXROWS=2000;
 let saveTimer;
 function dataChanged(rerender){
+  computeMask();
   if (rerender) renderData(); else updateInfo();
+  const fb=$('#filterBar'); fb.hidden=!D.filter;
+  if (D.filter){ $('#filterExpr').textContent=D.filter; $('#filterN').textContent = MASK ? ` — ${MASK.filter(Boolean).length} of ${D.rows.length} rows used in analyses` : ' — invalid expression, filter ignored'; }
   clearTimeout(saveTimer); saveTimer=setTimeout(()=>store.set('statbench.data', JSON.stringify(D)), 400);
 }
 function updateInfo(){
@@ -499,19 +647,19 @@ function renderData(){
   h+='</tr></thead><tbody>';
   const lim=Math.min(D.rows.length,MAXROWS);
   for (let i=0;i<lim;i++){
-    h+=`<tr><td class="rn"><button class="x" data-delrow="${i}" title="Delete row">×</button>${i+1}</td>`;
+    h+=`<tr${MASK&&!MASK[i]?' class="off"':''}><td class="rn"><button class="x" data-delrow="${i}" title="Delete row">×</button>${i+1}</td>`;
     const r=D.rows[i]; for (let j=0;j<D.cols.length;j++) h+=`<td><input data-i="${i}" data-j="${j}" value="${esc(r[j])}"></td>`;
     h+='</tr>';
   }
   h+='</tbody></table>';
-  if (D.rows.length>lim) h+=`<div class="note" style="padding:8px 12px">Showing the first ${MAXROWS} of ${D.rows.length} rows for editing. All rows are used in analyses.</div>`;
+  if (D.rows.length>lim) h+=`<div class="note" style="padding:8px 12px">Showing the first ${MAXROWS} of ${D.rows.length} rows for editing. All rows are used in analyses (subject to any filter).</div>`;
   wrap.innerHTML=h; updateInfo();
 }
 $('#tableWrap').addEventListener('change', e=>{
   const t=e.target;
-  if (t.classList.contains('cn')){ const j=+t.dataset.j; D.cols[j]=uniqueName(t.value.trim()||`V${j+1}`, j); t.value=D.cols[j]; dataChanged(); return; }
+  if (t.classList.contains('cn')){ const j=+t.dataset.j; snap(); D.cols[j]=uniqueName(t.value.trim()||`V${j+1}`, j); t.value=D.cols[j]; dataChanged(); return; }
   if (t.dataset.i!=null){
-    const i=+t.dataset.i, j=+t.dataset.j; D.rows[i][j]=t.value.trim();
+    const i=+t.dataset.i, j=+t.dataset.j; snap(); D.rows[i][j]=t.value.trim();
     const head=$('#tableWrap thead').querySelectorAll('th')[j+1].querySelector('.badge'); head.outerHTML=badge(j);
     dataChanged();
   }
@@ -526,8 +674,8 @@ $('#tableWrap').addEventListener('keydown', e=>{
 });
 $('#tableWrap').addEventListener('click', e=>{
   const t=e.target.closest('button'); if (!t) return;
-  if (t.dataset.delcol!=null){ const j=+t.dataset.delcol; if (!confirm(`Delete column "${D.cols[j]}"?`)) return; D.cols.splice(j,1); D.rows.forEach(r=>r.splice(j,1)); dataChanged(true); }
-  else if (t.dataset.delrow!=null){ D.rows.splice(+t.dataset.delrow,1); dataChanged(true); }
+  if (t.dataset.delcol!=null){ const j=+t.dataset.delcol; if (!confirm(`Delete column "${D.cols[j]}"?`)) return; snap(); D.cols.splice(j,1); D.rows.forEach(r=>r.splice(j,1)); dataChanged(true); }
+  else if (t.dataset.delrow!=null){ snap(); D.rows.splice(+t.dataset.delrow,1); dataChanged(true); }
   else if (t.dataset.act==='sample') loadTable(sampleData());
   else if (t.dataset.act==='import') $('#file').click();
   else if (t.dataset.act==='paste') openPaste();
@@ -536,12 +684,20 @@ $('#tableWrap').addEventListener('click', e=>{
 $('#bSample').onclick=()=>{ if (!D.cols.length || confirm('Replace current data with the sample dataset?')) loadTable(sampleData()); };
 $('#bImport').onclick=()=>$('#file').click();
 $('#file').onchange=e=>{ const f=e.target.files[0]; if (!f) return; const rd=new FileReader(); rd.onload=()=>loadTable(parseCSV(rd.result)); rd.readAsText(f); e.target.value=''; };
-$('#bAddRow').onclick=()=>{ if (!D.cols.length) D.cols=['V1']; D.rows.push(D.cols.map(()=>'')); dataChanged(true); const w=$('#tableWrap'); w.scrollTop=w.scrollHeight; };
-$('#bAddCol').onclick=()=>{ D.cols.push(uniqueName(`V${D.cols.length+1}`)); D.rows.forEach(r=>r.push('')); dataChanged(true); };
+$('#bAddRow').onclick=()=>{ snap(); if (!D.cols.length) D.cols=['V1']; D.rows.push(D.cols.map(()=>'')); dataChanged(true); const w=$('#tableWrap'); w.scrollTop=w.scrollHeight; };
+$('#bAddCol').onclick=()=>{ snap(); D.cols.push(uniqueName(`V${D.cols.length+1}`)); D.rows.forEach(r=>r.push('')); dataChanged(true); };
 $('#bExport').onclick=()=>download('data.csv', toCSV(), 'text/csv');
-$('#bClear').onclick=()=>{ if (D.cols.length && confirm('Clear all data?')){ D={cols:[],rows:[]}; dataChanged(true); } };
+$('#bClear').onclick=()=>{ if (D.cols.length && confirm('Clear all data?')){ snap(); D={cols:[],rows:[]}; dataChanged(true); } };
 $('#bPaste').onclick=()=>openPaste();
 $('#bCompute').onclick=()=>openCompute();
+$('#bRecode').onclick=()=>openRecode();
+$('#bSort').onclick=()=>openSort();
+$('#bFilter').onclick=()=>openFilter();
+$('#bFilterOff').onclick=()=>{ snap(); D.filter=undefined; dataChanged(true); };
+$('#bUndo').onclick=undo;
+document.addEventListener('keydown', e=>{
+  if ((e.ctrlKey||e.metaKey) && !e.shiftKey && e.key.toLowerCase()==='z' && !e.target.matches('input,textarea,select') && !dlg.open && !$('#tab-data').hidden){ e.preventDefault(); undo(); }
+});
 function download(name, text, type){
   const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([text],{type})); a.download=name; a.click();
   setTimeout(()=>URL.revokeObjectURL(a.href),1000);
@@ -572,6 +728,7 @@ const altText = (alt, a, b) => alt==='greater' ? `${a} > ${b}` : alt==='less' ? 
 function need(cond, msg){ if (!cond) throw new Error(msg); }
 
 /* ================= SVG charts ================= */
+const PAL=['#3b82f6','#f97316','#10b981','#a855f7','#ec4899','#06b6d4','#eab308','#64748b'];
 function niceTicks(min,max,count=5){
   if (!(max>min)){ min-=1; max+=1; }
   const step0=(max-min)/count, mag=10**Math.floor(Math.log10(step0)), e=step0/mag;
@@ -581,15 +738,16 @@ function niceTicks(min,max,count=5){
   return {lo,hi,ticks};
 }
 const tickFmt = t => Math.abs(t)>=1e5 ? t.toExponential(1) : String(+t.toPrecision(6));
-function makePlot({xmin,xmax,ymin,ymax,xlab='',ylab='',title='',cats=null,w=600,h=360}){
+function makePlot({xmin,xmax,ymin,ymax,xlab='',ylab='',title='',cats=null,legend=null,w=600,h=360}){
   const rot = cats && cats.length>6;
-  const m={l:58,r:18,t:title?30:14,b:rot?78:46};
+  const m={l:58,r:18,t:(title?30:14)+(legend?20:0),b:rot?78:46};
   const X = cats ? null : niceTicks(xmin,xmax), Y=niceTicks(ymin,ymax);
   const pw=w-m.l-m.r, ph=h-m.t-m.b;
   const sx = cats ? i=>m.l+(i+0.5)*pw/cats.length : v=>m.l+(v-X.lo)/(X.hi-X.lo)*pw;
   const sy = v=>m.t+ph-(v-Y.lo)/(Y.hi-Y.lo)*ph;
   let g='';
   if (title) g+=`<text class="ttl" x="${m.l}" y="18">${esc(title)}</text>`;
+  if (legend){ let lx=m.l; const ly=title?38:16; legend.forEach((name,i)=>{ const lab=String(name).length>16?String(name).slice(0,15)+'…':String(name); if (lx>w-60) return; g+=`<rect x="${lx}" y="${ly-8}" width="10" height="10" rx="2" fill="${PAL[i%PAL.length]}"/><text x="${lx+14}" y="${ly+1}">${esc(lab)}</text>`; lx+=24+lab.length*6.3; }); }
   for (const t of Y.ticks) g+=`<line class="grid" x1="${m.l}" x2="${w-m.r}" y1="${sy(t)}" y2="${sy(t)}"/><text x="${m.l-7}" y="${sy(t)+4}" text-anchor="end">${tickFmt(t)}</text>`;
   if (cats) cats.forEach((c,i)=>{ const lab=esc(String(c).length>14?String(c).slice(0,13)+'…':c);
       g+= rot ? `<text x="${sx(i)}" y="${h-m.b+14}" text-anchor="end" transform="rotate(-40 ${sx(i)} ${h-m.b+14})">${lab}</text>` : `<text x="${sx(i)}" y="${h-m.b+17}" text-anchor="middle">${lab}</text>`; });
@@ -637,17 +795,44 @@ function boxSVG(groups, {ylab, title}={}){ // groups: [[label, array]]
   });
   return Pl.wrap(g);
 }
-function scatterSVG(x,y,{xlab,ylab,line,ref0,title,refLine}={}){
-  const Pl=makePlot({xmin:Math.min(...x),xmax:Math.max(...x),ymin:Math.min(...y,ref0?0:Infinity),ymax:Math.max(...y,ref0?0:-Infinity),xlab,ylab,title});
+function scatterSVG(x,y,{xlab,ylab,line,ref0,title,refLine,groups,lines}={}){
+  const glv = groups ? sortLevels([...new Set(groups)]) : null;
+  const Pl=makePlot({xmin:Math.min(...x),xmax:Math.max(...x),ymin:Math.min(...y,ref0?0:Infinity),ymax:Math.max(...y,ref0?0:-Infinity),xlab,ylab,title,legend:glv});
   let g='';
   if (ref0) g+=`<line class="ref" x1="${Pl.m.l}" x2="${Pl.m.l+Pl.pw}" y1="${Pl.sy(0)}" y2="${Pl.sy(0)}"/>`;
-  x.forEach((v,i)=>{ g+=`<circle class="pt" cx="${Pl.sx(v).toFixed(1)}" cy="${Pl.sy(y[i]).toFixed(1)}" r="3.8"><title>(${f(v)}, ${f(y[i])})</title></circle>`; });
-  const ln = (a,b,cls) => { const x0=Pl.X.lo, x1=Pl.X.hi; const clip=v=>Math.max(Pl.Y.lo,Math.min(Pl.Y.hi,v));
-    // clip line segment to plot box by sampling ends
+  x.forEach((v,i)=>{ const col = glv ? ` style="fill:${PAL[glv.indexOf(groups[i])%PAL.length]}"` : '';
+    g+=`<circle class="pt"${col} cx="${Pl.sx(v).toFixed(1)}" cy="${Pl.sy(y[i]).toFixed(1)}" r="3.8"><title>${groups?esc(groups[i])+': ':''}(${f(v)}, ${f(y[i])})</title></circle>`; });
+  const ln = (a,b,cls,color) => { const x0=Pl.X.lo, x1=Pl.X.hi, clip=v=>Math.max(Pl.Y.lo,Math.min(Pl.Y.hi,v));
     let xa=x0, xb=x1; if (b!==0){ const xs=[(Pl.Y.lo-a)/b,(Pl.Y.hi-a)/b].sort((p,q)=>p-q); xa=Math.max(x0,xs[0]); xb=Math.min(x1,xs[1]); }
-    return xa<xb ? `<line class="${cls}" x1="${Pl.sx(xa)}" x2="${Pl.sx(xb)}" y1="${Pl.sy(clip(a+b*xa))}" y2="${Pl.sy(clip(a+b*xb))}"/>` : ''; };
+    return xa<xb ? `<line class="${cls}"${color?` style="stroke:${color}"`:''} x1="${Pl.sx(xa)}" x2="${Pl.sx(xb)}" y1="${Pl.sy(clip(a+b*xa))}" y2="${Pl.sy(clip(a+b*xb))}"/>` : ''; };
   if (refLine) g+=ln(refLine[0],refLine[1],'ref');
   if (line) g+=ln(line[0],line[1],'line');
+  if (lines) lines.forEach(([a,b,lev])=>{ g+=ln(a,b,'line',PAL[glv.indexOf(lev)%PAL.length]); });
+  return Pl.wrap(g);
+}
+function meansSVG(cats, series, {ylab,title,xlab}={}){ // series: [{name, pts:[{m,lo,hi}|null]}]
+  const vals=series.flatMap(s=>s.pts.filter(Boolean).flatMap(p=>[p.lo,p.hi,p.m])).filter(Number.isFinite);
+  const multi=series.length>1;
+  const Pl=makePlot({ymin:Math.min(...vals),ymax:Math.max(...vals),cats,ylab,xlab,title,legend:multi?series.map(s=>s.name):null});
+  const step=Pl.pw/cats.length, dodge=multi?Math.min(14,step*0.5/series.length):0; let g='';
+  series.forEach((s,k)=>{
+    const col=PAL[k%PAL.length], off=(k-(series.length-1)/2)*dodge; let d='';
+    s.pts.forEach((p,i)=>{ if (!p) return; const x=Pl.sx(i)+off; d+=(d?'L':'M')+x+','+Pl.sy(p.m);
+      if (Number.isFinite(p.lo)) g+=`<line style="stroke:${col};stroke-width:1.5" x1="${x}" x2="${x}" y1="${Pl.sy(p.lo)}" y2="${Pl.sy(p.hi)}"/><line style="stroke:${col};stroke-width:1.5" x1="${x-5}" x2="${x+5}" y1="${Pl.sy(p.lo)}" y2="${Pl.sy(p.lo)}"/><line style="stroke:${col};stroke-width:1.5" x1="${x-5}" x2="${x+5}" y1="${Pl.sy(p.hi)}" y2="${Pl.sy(p.hi)}"/>`;
+      g+=`<circle cx="${x}" cy="${Pl.sy(p.m)}" r="4.5" style="fill:${col};stroke:var(--panel);stroke-width:1.2"><title>${esc(s.name?s.name+', ':'')}${esc(cats[i])}: mean ${f(p.m)} [${f(p.lo)}, ${f(p.hi)}]</title></circle>`; });
+    if (cats.length>1) g=`<path d="${d}" style="stroke:${col};stroke-width:2;fill:none;opacity:.7"/>`+g;
+  });
+  return Pl.wrap(g);
+}
+const meanCI = a => { if (!a||!a.length) return null; const s=summary(a), q=a.length>1?tinv(0.975,a.length-1):NaN; return {m:s.mean, lo:s.mean-q*s.se, hi:s.mean+q*s.se}; };
+function lineSVG(x, ys, {xlab,ylab,title,names,hline,ymin,ymax,points=true}={}){ // ys: array of series
+  const all=ys.flat().concat(hline!=null?[hline]:[]);
+  const Pl=makePlot({xmin:Math.min(...x),xmax:Math.max(...x),ymin:ymin??Math.min(...all),ymax:ymax??Math.max(...all),xlab,ylab,title,legend:names&&names.length>1?names:null});
+  let g='';
+  if (hline!=null) g+=`<line class="ref" x1="${Pl.m.l}" x2="${Pl.m.l+Pl.pw}" y1="${Pl.sy(hline)}" y2="${Pl.sy(hline)}"/>`;
+  ys.forEach((y,k)=>{ const col=PAL[k%PAL.length];
+    g+=`<path d="${x.map((v,i)=>(i?'L':'M')+Pl.sx(v).toFixed(1)+','+Pl.sy(y[i]).toFixed(1)).join('')}" style="stroke:${col};stroke-width:2;fill:none"/>`;
+    if (points) x.forEach((v,i)=>{ g+=`<circle cx="${Pl.sx(v)}" cy="${Pl.sy(y[i])}" r="3.5" style="fill:${col}"><title>${f(v,2)}: ${f(y[i])}</title></circle>`; }); });
   return Pl.wrap(g);
 }
 function qqSVG(a,{title='Normal Q-Q plot'}={}){
@@ -667,6 +852,42 @@ function twoGroups(o){
   return sp;
 }
 
+function buildDesign(rows, xs, ok){ // dummy-codes text predictors (first level = reference)
+  const isN=xs.map(colIsNum), S=xs.map((j,k)=>rows.map(r=>isN[k]?toNum(r[j]):(isMiss(r[j])?null:String(r[j]).trim())));
+  const idx=[]; rows.forEach((_,i)=>{ if (ok(i) && xs.every((j,k)=>isN[k]?Number.isFinite(S[k][i]):S[k][i]!=null)) idx.push(i); });
+  const terms=['(Intercept)'], cols=[];
+  xs.forEach((j,k)=>{
+    if (isN[k]){ terms.push(cname(j)); cols.push(idx.map(i=>S[k][i])); }
+    else { const lv=sortLevels([...new Set(idx.map(i=>S[k][i]))]); for (const L of lv.slice(1)){ terms.push(`${cname(j)} [${esc(L)}]`); cols.push(idx.map(i=>S[k][i]===L?1:0)); } }
+  });
+  return {idx, terms, cols, X:idx.map((_,r)=>[1,...cols.map(c=>c[r])])};
+}
+function saveCols(rows, idx, defs){ // defs: [[name, values aligned with idx]]
+  snap(); const names=[];
+  for (const [name,vals] of defs){
+    const nm=uniqueName(name), m=new Map(); idx.forEach((i,r)=>m.set(rows[i], String(+vals[r].toPrecision(10))));
+    D.cols.push(nm); D.rows.forEach(r=>r.push(m.get(r)??'')); names.push(nm);
+  }
+  dataChanged(true); return names;
+}
+function postHoc(sp, method, A){
+  const k=sp.length, G=sp.map(g=>g[1]), rows=[], ps=[];
+  if (method==='holm'){
+    for (let i=0;i<k;i++) for (let j=i+1;j<k;j++){ const w=welchT(G[i],G[j]), p=pT(w.t,w.df,'two'); ps.push(p); rows.push([`${esc(sp[i][0])} − ${esc(sp[j][0])}`,f(w.diff),f(w.se),f(w.t),f(w.df,2),fp(p)]); }
+    holm(ps).forEach((p,i)=>rows[i].push(P(p)));
+    return h5('Post hoc: Welch t-tests (Holm-adjusted)')+table(['Comparison','Mean diff.','SE','t','df','p (raw)','p (Holm)'],rows);
+  }
+  const qc = method==='tukey' ? qtukey(0.95,k,A.dfw) : null;
+  for (let i=0;i<k;i++) for (let j=i+1;j<k;j++){
+    const a=G[i], b=G[j], diff=mean(a)-mean(b); let se, df;
+    if (method==='tukey'){ se=Math.sqrt(A.msw*(1/a.length+1/b.length)); df=A.dfw; }
+    else { const va=variance(a)/a.length, vb=variance(b)/b.length; se=Math.sqrt(va+vb); df=(va+vb)**2/(va*va/(a.length-1)+vb*vb/(b.length-1)); }
+    const t=diff/se, p=1-ptukey(Math.abs(t)*Math.SQRT2,k,df), q=(qc??qtukey(0.95,k,df))/Math.SQRT2;
+    rows.push([`${esc(sp[i][0])} − ${esc(sp[j][0])}`,f(diff),f(se),f(t),method==='gh'?f(df,2):df,P(Math.max(0,p)),ci([diff-q*se,diff+q*se])]);
+  }
+  return h5(method==='tukey'?'Post hoc: Tukey HSD (Tukey–Kramer)':'Post hoc: Games–Howell')
+    + table(['Comparison','Mean diff.','SE','t','df',`p (${method==='tukey'?'Tukey':'Games–Howell'})`,'95% simultaneous CI'],rows);
+}
 const AN = {
 desc:{ g:'Describe', name:'Descriptive statistics',
   fields:[{k:'vars',t:'nums',label:'Variables'},{k:'g',t:'col',label:'Split by (optional)',optional:true}],
@@ -727,12 +948,19 @@ box:{ g:'Graphs', name:'Box plot',
     return `<div class="plots">${out}</div>`+note('Box = IQR, line = median, ◆ = mean, whiskers = 1.5 × IQR, circles = outliers.');
   }},
 scatter:{ g:'Graphs', name:'Scatter plot',
-  fields:[{k:'x',t:'num',label:'X variable'},{k:'y',t:'num',label:'Y variable',nth:1},{k:'fit',t:'check',label:'Add regression line',def:true}],
+  fields:[{k:'x',t:'num',label:'X variable'},{k:'y',t:'num',label:'Y variable',nth:1},{k:'g',t:'col',label:'Color by group (optional)',optional:true},{k:'fit',t:'check',label:'Add regression line(s)',def:true}],
   run(o){
-    const [x,y]=pairs(o.x,o.y); need(x.length>=3,'Need at least 3 complete pairs.');
-    const r=pearson(x,y), b=r*sd(y)/sd(x), a=mean(y)-b*mean(x);
-    return `<div class="plots">${scatterSVG(x,y,{xlab:D.cols[o.x],ylab:D.cols[o.y],line:o.fit?[a,b]:null})}</div>`
-      + note(`n = ${x.length}, r = ${f(r)}, R² = ${f(r*r)}${o.fit?`; fitted line: ŷ = ${f(a)} ${b<0?'−':'+'} ${f(Math.abs(b))}·x`:''}`);
+    const X=numCol(o.x), Y=numCol(o.y), G=o.g>=0?strCol(o.g):null, x=[], y=[], gs=[];
+    X.forEach((v,i)=>{ if (Number.isFinite(v)&&Number.isFinite(Y[i])&&(!G||G[i]!=null)){ x.push(v); y.push(Y[i]); if (G) gs.push(G[i]); } });
+    need(x.length>=3,'Need at least 3 complete pairs.');
+    const fitLine=(x,y)=>{ const r=pearson(x,y), b=r*sd(y)/sd(x); return [mean(y)-b*mean(x), b, r]; };
+    const [a,b,r]=fitLine(x,y); let lines=null, extra='';
+    if (G && o.fit){ lines=[]; const rows=[];
+      for (const L of sortLevels([...new Set(gs)])){ const xi=x.filter((_,i)=>gs[i]===L), yi=y.filter((_,i)=>gs[i]===L);
+        if (xi.length>=3 && sd(xi)>0){ const [ga,gb,gr]=fitLine(xi,yi); lines.push([ga,gb,L]); rows.push([esc(L),xi.length,f(gr),f(gb),f(ga)]); } }
+      extra=table(['Group','n','r','Slope','Intercept'],rows); }
+    return `<div class="plots">${scatterSVG(x,y,{xlab:D.cols[o.x],ylab:D.cols[o.y],line:o.fit&&!G?[a,b]:null,groups:G?gs:null,lines})}</div>`
+      + note(`n = ${x.length}, r = ${f(r)}, R² = ${f(r*r)}${o.fit&&!G?`; fitted line: ŷ = ${f(a)} ${b<0?'−':'+'} ${f(Math.abs(b))}·x`:''}`)+extra;
   }},
 t1:{ g:'Compare means', name:'One-sample t-test',
   fields:[{k:'x',t:'num',label:'Variable'},{k:'mu',t:'number',label:'Test value (μ₀)',def:0},ALT,CONF],
@@ -767,11 +995,11 @@ tp:{ g:'Compare means', name:'Paired-samples t-test',
     const dd=x.map((v,i)=>v-y[i]), s=summary(dd), conf=o.conf||0.95, df=s.n-1, t=s.mean/s.se, p=pT(t,df,o.alt), dz=s.mean/s.sd, r=pearson(x,y);
     return table(['Variable','N','Mean','SD','SE'],[[cname(o.x),x.length,f(mean(x)),f(sd(x)),f(sd(x)/Math.sqrt(x.length))],[cname(o.y),y.length,f(mean(y)),f(sd(y)),f(sd(y)/Math.sqrt(y.length))]])
       + table(['Mean diff.','SD diff.','SE','t','df','p',`${Math.round(conf*100)}% CI`,"Cohen's d<sub>z</sub>",'r (pairs)'],[[f(s.mean),f(s.sd),f(s.se),f(t),df,P(p),ci(ciT(s.mean,s.se,df,conf,o.alt)),f(dz),f(r)]])
-      + note(`Difference = ${cname(o.x)} − ${cname(o.y)}; ${D.rows.length-x.length} incomplete pairs excluded.`)
+      + note(`Difference = ${cname(o.x)} − ${cname(o.y)}; ${AR().length-x.length} incomplete pairs excluded.`)
       + report(`t(${df}) = ${f(t,2)}, p ${pAPA(p)}, d<sub>z</sub> = ${f(dz,2)}`);
   }},
 anova:{ g:'Compare means', name:'One-way ANOVA',
-  fields:[{k:'y',t:'num',label:'Dependent variable'},{k:'g',t:'col',label:'Factor (grouping variable)',prefCat:true},{k:'post',t:'check',label:'Post hoc pairwise comparisons (Welch t, Holm-adjusted)',def:true}],
+  fields:[{k:'y',t:'num',label:'Dependent variable'},{k:'g',t:'col',label:'Factor (grouping variable)',prefCat:true},{k:'post',t:'select',label:'Post hoc comparisons',options:[['tukey','Tukey HSD (equal variances)'],['gh','Games–Howell (unequal variances)'],['holm','Welch t-tests, Holm-adjusted'],['none','None']]}],
   run(o){
     const sp=splitBy(o.y,o.g); need(sp.length>=2,'Need at least 2 groups.'); need(sp.every(g=>g[1].length>=2),'Each group needs at least 2 observations.');
     const G=sp.map(g=>g[1]), A=anova1(G), lv=levene(G), wa=welchAnova(G);
@@ -779,12 +1007,7 @@ anova:{ g:'Compare means', name:'One-way ANOVA',
       + h5('ANOVA')+table(['Source','Sum of squares','df','Mean square','F','p'],[
         ['Between groups',f(A.ssb),A.dfb,f(A.msb),f(A.F),P(A.p)],['Within groups',f(A.ssw),A.dfw,f(A.msw),'',''],['Total',f(A.sst),A.dfb+A.dfw,'','','']])
       + table(['Statistic','Value'],[['η² (eta squared)',f(A.eta2)],['ω² (omega squared)',f(A.omega2)],[`Welch's ANOVA F(${wa.df1}, ${f(wa.df2,2)})`,f(wa.F)],["Welch's p",P(wa.p)],[`Levene's test F(${lv.dfb}, ${lv.dfw})`,f(lv.F)],['Levene p',P(lv.p)]]);
-    if (o.post && sp.length>2){
-      const rows=[], ps=[];
-      for (let i=0;i<sp.length;i++) for (let j=i+1;j<sp.length;j++){ const w=welchT(G[i],G[j]); const p=pT(w.t,w.df,'two'); ps.push(p); rows.push([`${esc(sp[i][0])} − ${esc(sp[j][0])}`,f(w.diff),f(w.se),f(w.t),f(w.df,2),fp(p)]); }
-      holm(ps).forEach((p,i)=>rows[i].push(P(p)));
-      out+=h5('Post hoc comparisons')+table(['Comparison','Mean diff.','SE','t','df','p (raw)','p (Holm)'],rows);
-    }
+    if (o.post!=='none' && sp.length>2) out+=postHoc(sp,o.post,A);
     if (lv.p<0.05) out+=warn("Levene's test suggests unequal variances — prefer Welch's ANOVA.");
     return out+`<div class="plots">${boxSVG(sp,{ylab:D.cols[o.y]})}</div>`+report(`F(${A.dfb}, ${A.dfw}) = ${f(A.F,2)}, p ${pAPA(A.p)}, η² = ${f(A.eta2,2)}`);
   }},
@@ -837,7 +1060,7 @@ kw:{ g:'Nonparametric', name:'Kruskal–Wallis test',
     return out+`<div class="plots">${boxSVG(sp,{ylab:D.cols[o.y]})}</div>`+report(`H(${df}) = ${f(H,2)}, p ${pAPA(p)}`);
   }},
 corr:{ g:'Relationships', name:'Correlation matrix',
-  fields:[{k:'vars',t:'nums',label:'Variables (2 or more)'},{k:'method',t:'select',label:'Method',options:[['pearson','Pearson r'],['spearman','Spearman ρ']]}],
+  fields:[{k:'vars',t:'nums',label:'Variables (2 or more)'},{k:'method',t:'select',label:'Method',options:[['pearson','Pearson r'],['spearman','Spearman ρ'],['kendall','Kendall τ-b']]}],
   run(o){
     need(o.vars.length>=2,'Select at least 2 variables.');
     const V=o.vars, k=V.length, cells=[];
@@ -846,30 +1069,24 @@ corr:{ g:'Relationships', name:'Correlation matrix',
         if (j>=i){ row.push(j===i?'<span class="note">—</span>':''); continue; }
         let [x,y]=pairs(V[i],V[j]); const n=x.length;
         if (n<3){ row.push('<small>n &lt; 3</small>'); continue; }
-        if (o.method==='spearman'){ x=rank(x).r; y=rank(y).r; }
-        const rr=pearson(x,y), t=rr*Math.sqrt((n-2)/(1-rr*rr)), p=Math.abs(rr)>=1?0:pT(t,n-2,'two');
+        let rr, p;
+        if (o.method==='kendall') ({r:rr,p}=kendall(x,y));
+        else { if (o.method==='spearman'){ x=rank(x).r; y=rank(y).r; } rr=pearson(x,y); const t=rr*Math.sqrt((n-2)/(1-rr*rr)); p=Math.abs(rr)>=1?0:pT(t,n-2,'two'); }
         const bg = Number.isFinite(rr) ? (rr>0?`rgba(59,130,246,${(Math.abs(rr)*0.5).toFixed(2)})`:`rgba(239,68,68,${(Math.abs(rr)*0.5).toFixed(2)})`) : 'transparent';
         const star = p<0.001?'***':p<0.01?'**':p<0.05?'*':'';
         row.push(`<div style="background:${bg};padding:4px 6px;border-radius:4px"><b>${f(rr)}${star}</b><small>p ${fp(p)}</small><small>n = ${n}</small></div>`);
       }
       cells.push(row);
     }
-    return table(['',...V.map(cname)],cells,'res corr')+note(`${o.method==='spearman'?'Spearman rank':'Pearson'} correlations, pairwise deletion. * p < .05, ** p < .01, *** p < .001 (two-sided).`);
+    return table(['',...V.map(cname)],cells,'res corr')+note(`${({pearson:'Pearson',spearman:'Spearman rank',kendall:'Kendall τ-b (asymptotic p)'})[o.method]} correlations, pairwise deletion. * p < .05, ** p < .01, *** p < .001 (two-sided).`);
   }},
 reg:{ g:'Relationships', name:'Linear regression',
-  fields:[{k:'y',t:'num',label:'Dependent variable'},{k:'xs',t:'cols',label:'Predictors (text columns are dummy-coded)'},{k:'plots',t:'check',label:'Residual diagnostics plots',def:true}],
+  fields:[{k:'y',t:'num',label:'Dependent variable'},{k:'xs',t:'cols',label:'Predictors (text columns are dummy-coded)'},{k:'plots',t:'check',label:'Residual diagnostics plots',def:true},{k:'save',t:'check',label:'Save predicted values & residuals as new columns'}],
   run(o){
     const xs=o.xs.filter(j=>j!==o.y); need(xs.length,'Select at least one predictor (other than the dependent variable).');
-    const isN=xs.map(colIsNum), Y=numCol(o.y), Sx=xs.map((j,k)=>isN[k]?numCol(j):strCol(j));
-    const keep=D.rows.map((_,i)=>Number.isFinite(Y[i]) && xs.every((j,k)=>isN[k]?Number.isFinite(Sx[k][i]):Sx[k][i]!=null));
-    const idx=keep.flatMap((v,i)=>v?[i]:[]);
-    const terms=['(Intercept)'], cols=[];
-    xs.forEach((j,k)=>{
-      if (isN[k]){ terms.push(cname(j)); cols.push(idx.map(i=>Sx[k][i])); }
-      else { const lv=sortLevels([...new Set(idx.map(i=>Sx[k][i]))]); for (const L of lv.slice(1)){ terms.push(`${cname(j)} [${esc(L)}]`); cols.push(idx.map(i=>Sx[k][i]===L?1:0)); } }
-    });
+    const rows=AR(), Y=numCol(o.y), {idx,terms,cols,X}=buildDesign(rows,xs,i=>Number.isFinite(Y[i]));
     const n=idx.length, p=terms.length; need(n>p,`Not enough complete cases (${n}) for ${p} parameters.`);
-    const y=idx.map(i=>Y[i]), X=idx.map((_,r)=>[1,...cols.map(c=>c[r])]), M=ols(X,y);
+    const y=idx.map(i=>Y[i]), M=ols(X,y);
     need(M,'The predictors are perfectly collinear (singular design matrix). Remove redundant predictors.');
     const dfe=n-p, dfr=p-1, mse=M.sse/dfe, ssr=M.sst-M.sse, F=(ssr/dfr)/mse, pF=fUpper(F,dfr,dfe), adj=1-(1-M.r2)*(n-1)/dfe, tq=tinv(0.975,dfe), sy=sd(y);
     const vif = cols.map((c,k)=>{ if (cols.length<2) return NaN; const others=cols.filter((_,q)=>q!==k); const m=ols(c.map((_,r)=>[1,...others.map(q=>q[r])]),c); return m?1/(1-m.r2):Infinity; });
@@ -880,7 +1097,8 @@ reg:{ g:'Relationships', name:'Linear regression',
     let out=h5('Model summary')+table(['N','R','R²','Adjusted R²','Std. error of estimate','Durbin–Watson'],[[n,f(Math.sqrt(M.r2)),f(M.r2),f(adj),f(Math.sqrt(mse)),f(dw)]])
       + h5('ANOVA')+table(['Source','Sum of squares','df','Mean square','F','p'],[['Regression',f(ssr),dfr,f(ssr/dfr),f(F),P(pF)],['Residual',f(M.sse),dfe,f(mse),'',''],['Total',f(M.sst),n-1,'','','']])
       + h5('Coefficients')+table(['Term','B','SE','β (std.)','t','p','95% CI','VIF'],coef)
-      + note(`${esc(D.cols[o.y])}: ${eq}`) + note(`${D.rows.length-n} rows excluded for missing values (listwise).`);
+      + note(`${esc(D.cols[o.y])}: ${eq}`) + note(`${rows.length-n} rows excluded for missing values (listwise).`);
+    if (o.save){ const nm=saveCols(rows,idx,[[`${D.cols[o.y]}_pred`,M.fit],[`${D.cols[o.y]}_resid`,M.res]]); out+=note(`Saved new columns: ${nm.map(esc).join(', ')}.`); }
     if (vif.some(v=>v>10)) out+=warn('Some VIF values exceed 10 — strong multicollinearity.');
     if (o.plots) out+=`<div class="plots">${scatterSVG(M.fit,M.res,{xlab:'Fitted values',ylab:'Residuals',ref0:true,title:'Residuals vs fitted'})}${qqSVG(M.res,{title:'Normal Q-Q of residuals'})}</div>`;
     return out+report(`R² = ${f(M.r2,2)}, F(${dfr}, ${dfe}) = ${f(F,2)}, p ${pAPA(pF)}`);
@@ -915,6 +1133,247 @@ chisq:{ g:'Categorical', name:'Chi-square test (crosstab)',
     if (low/(R.length*C.length)>0.2) out+=warn(`${low} of ${R.length*C.length} cells have expected counts below 5 — the χ² approximation may be unreliable${R.length===2&&C.length===2?"; use Fisher's exact test":''}.`);
     return out+report(`χ²(${df}, N = ${N}) = ${f(x2,2)}, p ${pAPA(chiUpper(x2,df))}, V = ${f(V,2)}`);
   }},
+meansplot:{ g:'Graphs', name:'Means plot (95% CI)',
+  fields:[{k:'y',t:'num',label:'Variable'},{k:'g',t:'col',label:'X-axis groups',prefCat:true},{k:'g2',t:'col',label:'Separate lines by (optional)',optional:true}],
+  run(o){
+    const Y=numCol(o.y), A=strCol(o.g), B=o.g2>=0?strCol(o.g2):null;
+    const idx=Y.map((_,i)=>i).filter(i=>Number.isFinite(Y[i])&&A[i]!=null&&(!B||B[i]!=null)); need(idx.length>=2,'Not enough complete data.');
+    const la=sortLevels([...new Set(idx.map(i=>A[i]))]); need(la.length<=50,'Too many groups on the x-axis (max 50).');
+    const lb=B?sortLevels([...new Set(idx.map(i=>B[i]))]):[null]; need(lb.length<=8,'Too many line groups (max 8).');
+    const rows=[];
+    const series=lb.map(L=>({name:L??'', pts:la.map(a=>{ const v=idx.filter(i=>A[i]===a&&(L==null||B[i]===L)).map(i=>Y[i]); const c=meanCI(v);
+      if (c) rows.push([esc(a),...(B?[esc(L)]:[]),v.length,f(c.m),f(v.length>1?sd(v):NaN),ci([c.lo,c.hi])]); return c; })}));
+    return `<div class="plots">${meansSVG(la,series,{ylab:D.cols[o.y],xlab:D.cols[o.g]})}</div>`
+      + table([cname(o.g),...(B?[cname(o.g2)]:[]),'N','Mean','SD','95% CI'],rows) + note('Error bars show 95% confidence intervals of the mean.');
+  }},
+anova2:{ g:'Compare means', name:'Two-way ANOVA',
+  fields:[{k:'y',t:'num',label:'Dependent variable'},{k:'a',t:'col',label:'Factor A',prefCat:true},{k:'b',t:'col',label:'Factor B',prefCat:true,nth:1},{k:'inter',t:'check',label:'Include A × B interaction',def:true}],
+  run(o){
+    need(o.a!==o.b,'Choose two different factors.');
+    const Y=numCol(o.y), A=strCol(o.a), B=strCol(o.b);
+    const idx=Y.map((_,i)=>i).filter(i=>Number.isFinite(Y[i])&&A[i]!=null&&B[i]!=null);
+    const la=sortLevels([...new Set(idx.map(i=>A[i]))]), lb=sortLevels([...new Set(idx.map(i=>B[i]))]);
+    need(la.length>=2&&lb.length>=2,'Each factor needs at least 2 levels.');
+    need(la.length*lb.length<=200,'Too many factor level combinations (max 200).');
+    const av=idx.map(i=>A[i]), bv=idx.map(i=>B[i]), y=idx.map(i=>Y[i]), n=y.length;
+    const ec=(vals,lv)=>lv.slice(0,-1).map(L=>vals.map(v=>v===L?1:v===lv[lv.length-1]?-1:0)); // sum-to-zero coding
+    const Ac=ec(av,la), Bc=ec(bv,lb), terms=[['A',Ac,cname(o.a)],['B',Bc,cname(o.b)]];
+    if (o.inter) terms.push(['AB',Ac.flatMap(ca=>Bc.map(cb=>ca.map((v,r)=>v*cb[r]))),`${cname(o.a)} × ${cname(o.b)}`]);
+    const fit=skip=>{ const cols=terms.filter(t=>t[0]!==skip).flatMap(t=>t[1]); return ols(y.map((_,r)=>[1,...cols.map(c=>c[r])]),y); };
+    const full=fit(null); need(full,'The design is singular — some A × B cells are probably empty. Try without the interaction.');
+    const dfe=n-1-terms.reduce((s,t)=>s+t[1].length,0); need(dfe>0,'Not enough observations for this model.');
+    const mse=full.sse/dfe, rep=[];
+    const rows=terms.map(([key,cols,label])=>{ const m=fit(key), ss=m?m.sse-full.sse:NaN, df=cols.length, F=(ss/df)/mse, p=fUpper(F,df,dfe);
+      rep.push(`${label}: F(${df}, ${dfe}) = ${f(F,2)}, p ${pAPA(p)}`); return [label,f(ss),df,f(ss/df),f(F),P(p),f(ss/(ss+full.sse))]; });
+    rows.push(['Residuals',f(full.sse),dfe,f(mse),'','',''],['Total (corrected)',f(full.sst),n-1,'','','','']);
+    const cell=(a,b)=>idx.filter(i=>A[i]===a&&B[i]===b).map(i=>Y[i]);
+    const cells=la.flatMap(a=>lb.map(b=>cell(a,b))).filter(c=>c.length>=2), lv=cells.length>=2?levene(cells):null;
+    let out=h5('Tests of between-subjects effects (Type III SS)')+table(['Source','Sum of squares','df','Mean square','F','p','Partial η²'],rows)
+      + h5('Cell means')+table([`${cname(o.a)} \\ ${cname(o.b)}`,...lb.map(esc),'Marginal'],[
+        ...la.map(a=>[`<b>${esc(a)}</b>`,...lb.map(b=>{ const c=cell(a,b); return c.length?`${f(mean(c))}<div class="sub">SD ${f(c.length>1?sd(c):NaN)} · n ${c.length}</div>`:'—'; }),f(mean(idx.filter(i=>A[i]===a).map(i=>Y[i])))]),
+        ['<b>Marginal</b>',...lb.map(b=>f(mean(idx.filter(i=>B[i]===b).map(i=>Y[i])))),f(mean(y))]]);
+    if (lv) out+=table([`Levene's test (cells) F(${lv.dfb}, ${lv.dfw})`,'p'],[[f(lv.F),P(lv.p)]]);
+    return out+`<div class="plots">${meansSVG(la,lb.map(b=>({name:b,pts:la.map(a=>meanCI(cell(a,b)))})),{ylab:D.cols[o.y],xlab:D.cols[o.a],title:'Interaction plot (means ± 95% CI)'})}</div>`
+      + note('Type III sums of squares with sum-to-zero (effect) coding; suitable for unbalanced designs.') + report(rep.join('; '));
+  }},
+rmanova:{ g:'Compare means', name:'Repeated-measures ANOVA',
+  fields:[{k:'vars',t:'nums',label:'Conditions (one column per measurement, ≥ 2)'},{k:'post',t:'check',label:'Pairwise paired t-tests (Holm-adjusted)',def:true}],
+  run(o){
+    need(o.vars.length>=2,'Select at least 2 columns.');
+    const C=o.vars.map(numCol), k=C.length, M=C[0].map((_,i)=>C.map(c=>c[i])).filter(r=>r.every(Number.isFinite)), n=M.length;
+    need(n>=3,'Need at least 3 complete cases.');
+    const all=M.flat(), gm=mean(all), cm=o.vars.map((_,j)=>mean(M.map(r=>r[j]))), smn=M.map(mean);
+    const ssc=n*sum(cm.map(m=>(m-gm)**2)), sss=k*sum(smn.map(m=>(m-gm)**2)), sst=sum(all.map(v=>(v-gm)**2)), sse=sst-ssc-sss;
+    const dfc=k-1, dfe=(k-1)*(n-1), F=(ssc/dfc)/(sse/dfe);
+    const S=cm.map((mi,a)=>cm.map((mj,b)=>sum(M.map(r=>(r[a]-mi)*(r[b]-mj)))/(n-1)));
+    const rm=S.map(mean), tm=mean(rm), St=S.map((r,a)=>r.map((v,b)=>v-rm[a]-rm[b]+tm));
+    const tr=sum(St.map((r,a)=>r[a])), gg=k>2?Math.min(1,tr*tr/((k-1)*sum(St.flat().map(v=>v*v)))):1;
+    const hf=k>2?Math.min(1,(n*(k-1)*gg-2)/((k-1)*(n-1-(k-1)*gg))):1;
+    const rows=[['Sphericity assumed',1],['Greenhouse–Geisser',gg],['Huynh–Feldt',hf]].map(([nm,e])=>[nm,f(ssc),f(dfc*e,2),f(ssc/(dfc*e)),f(F),P(fUpper(F,dfc*e,dfe*e)),f(e)]);
+    rows.push(['Error (sphericity assumed)',f(sse),dfe,f(sse/dfe),'','','']);
+    let out=h5('Descriptives')+table(['Condition','N','Mean','SD'],o.vars.map((j,c)=>[cname(j),n,f(cm[c]),f(sd(M.map(r=>r[c])))]))
+      + h5('Within-subjects effect')+table(['Correction','Sum of squares','df','Mean square','F','p','ε'],rows)
+      + table(['Partial η²','Subjects SS','Subjects df'],[[f(ssc/(ssc+sse)),f(sss),n-1]]);
+    if (k>2 && n>k){
+      const q=k-1, H=[...Array(k)].map((_,i)=>[...Array(q)].map((_,j)=>{ const z=Math.sqrt((j+1)*(j+2)); return i<=j?1/z:i===j+1?-(j+1)/z:0; }));
+      const Sg=[...Array(q)].map((_,a)=>[...Array(q)].map((_,b)=>{ let s=0; for (let i=0;i<k;i++) for (let j=0;j<k;j++) s+=H[i][a]*S[i][j]*H[j][b]; return s; }));
+      const W=det(Sg)/(sum(Sg.map((r,i)=>r[i]))/q)**q, fct=1-(2*q*q+q+2)/(6*q*(n-1)), chi=-(n-1)*fct*Math.log(W), df=q*(q+1)/2-1, pm=chiUpper(chi,df);
+      out+=table(["Mauchly's W",'χ²','df','p'],[[f(W),f(chi),df,P(pm)]]);
+      if (pm<0.05) out+=warn('Sphericity is violated (Mauchly p < .05) — use the Greenhouse–Geisser (ε < .75) or Huynh–Feldt corrected results.');
+    }
+    if (o.post && k>2){
+      const pr=[], ps=[];
+      for (let a=0;a<k;a++) for (let b=a+1;b<k;b++){ const d=M.map(r=>r[a]-r[b]), s=summary(d), t=s.mean/s.se, p=pT(t,n-1,'two'); ps.push(p); pr.push([`${cname(o.vars[a])} − ${cname(o.vars[b])}`,f(s.mean),f(s.se),f(t),n-1,fp(p)]); }
+      holm(ps).forEach((p,i)=>pr[i].push(P(p)));
+      out+=h5('Pairwise comparisons')+table(['Comparison','Mean diff.','SE','t','df','p (raw)','p (Holm)'],pr);
+    }
+    const best=gg<1?['Greenhouse–Geisser',gg]:['',1];
+    return out+`<div class="plots">${meansSVG(o.vars.map(j=>D.cols[j]),[{name:'',pts:o.vars.map((_,c)=>meanCI(M.map(r=>r[c])))}],{title:'Means ± 95% CI'})}</div>`
+      + note(`${AR().length-n} rows with missing values excluded (listwise).`)
+      + report(`${best[0]?best[0]+'-corrected ':''}F(${f(dfc*best[1],2)}, ${f(dfe*best[1],2)}) = ${f(F,2)}, p ${pAPA(fUpper(F,dfc*best[1],dfe*best[1]))}, partial η² = ${f(ssc/(ssc+sse),2)}`);
+  }},
+friedman:{ g:'Nonparametric', name:'Friedman test',
+  fields:[{k:'vars',t:'nums',label:'Conditions (one column per measurement, ≥ 2)'}],
+  run(o){
+    need(o.vars.length>=2,'Select at least 2 columns.');
+    const C=o.vars.map(numCol), k=C.length, M=C[0].map((_,i)=>C.map(c=>c[i])).filter(r=>r.every(Number.isFinite)), n=M.length;
+    need(n>=2,'Need at least 2 complete cases.');
+    const Rk=M.map(rank), Rj=o.vars.map((_,c)=>sum(Rk.map(r=>r.r[c]))), T=sum(Rk.map(r=>r.T));
+    const Q=(12*sum(Rj.map(v=>v*v))-3*n*n*k*(k+1)**2)/(n*k*(k+1)-T/(k-1)), df=k-1, p=chiUpper(Q,df);
+    return table(['Condition','N','Median','Mean rank'],o.vars.map((j,c)=>[cname(j),n,f(median(M.map(r=>r[c]))),f(Rj[c]/n,2)]))
+      + table(['χ²','df','p',"Kendall's W"],[[f(Q),df,P(p),f(Q/(n*(k-1)))]])
+      + note(`Ranks are computed within each case (tie-corrected). ${AR().length-n} rows with missing values excluded.`)
+      + report(`χ²<sub>F</sub>(${df}) = ${f(Q,2)}, p ${pAPA(p)}, W = ${f(Q/(n*(k-1)),2)}`);
+  }},
+logreg:{ g:'Relationships', name:'Logistic regression',
+  fields:[{k:'y',t:'col',label:'Outcome variable',prefCat:true,nth:1},{k:'ev',t:'level',of:'y',label:'Event value (coded 1; all other values = 0)'},{k:'xs',t:'cols',label:'Predictors (text columns are dummy-coded)'},{k:'save',t:'check',label:'Save predicted probabilities as a new column'}],
+  run(o){
+    const xs=o.xs.filter(j=>j!==o.y); need(xs.length,'Select at least one predictor (other than the outcome).');
+    const rows=AR(), Ys=strCol(o.y), {idx,terms,X}=buildDesign(rows,xs,i=>Ys[i]!=null);
+    const y=idx.map(i=>Ys[i]===o.ev?1:0), n=y.length, p=terms.length, n1=sum(y);
+    need(n>p,`Not enough complete cases (${n}) for ${p} parameters.`);
+    need(n1>0&&n1<n,'The outcome must contain both event and non-event cases.');
+    const M=logitFit(X,y); need(M,'The model could not be fitted (singular design — remove redundant predictors).');
+    const p0=n1/n, ll0=n1*Math.log(p0)+(n-n1)*Math.log(1-p0), lr=2*(M.ll-ll0), dfm=p-1, plr=chiUpper(lr,dfm);
+    const cs=1-Math.exp(2*(ll0-M.ll)/n), nag=cs/(1-Math.exp(2*ll0/n)), z=1.959963984540054;
+    const ses=M.b.map((_,k)=>Math.sqrt(M.inv[k][k]));
+    const coef=M.b.map((b,k)=>{ const se=ses[k], w=b/se; return [terms[k],f(b),f(se),f(w),P(pZ(w,'two')),f(Math.exp(b)),ci([Math.exp(b-z*se),Math.exp(b+z*se)])]; });
+    let tp=0,tn=0,fpos=0,fneg=0; M.pr.forEach((q,i)=>{ const pr=q>=0.5; if (y[i]) pr?tp++:fneg++; else pr?fpos++:tn++; });
+    const rk=rank(M.pr).r, auc=(sum(rk.filter((_,i)=>y[i]))-n1*(n1+1)/2)/(n1*(n-n1));
+    const ord=M.pr.map((q,i)=>i).sort((a,b)=>M.pr[b]-M.pr[a]), fx=[0], ty=[0]; let cT=0,cF=0;
+    ord.forEach((i,r)=>{ y[i]?cT++:cF++; if (r===ord.length-1 || M.pr[ord[r+1]]!==M.pr[i]){ fx.push(cF/(n-n1)); ty.push(cT/n1); } });
+    let out=h5('Model fit')+table(['N','Events','−2 log-likelihood','LR χ²','df','p','McFadden R²','Cox–Snell R²','Nagelkerke R²','AIC','AUC'],
+        [[n,n1,f(-2*M.ll),f(lr),dfm,P(plr),f(1-M.ll/ll0),f(cs),f(nag),f(-2*M.ll+2*p),f(auc)]])
+      + h5('Coefficients')+table(['Term','B','SE','Wald z','p','Odds ratio','95% CI (OR)'],coef)
+      + h5('Classification (cutoff 0.5)')+table(['Observed \\ Predicted','0','1','% correct'],[
+        [`0 (not ${esc(o.ev)})`,tn,fpos,f(100*tn/(n-n1),1)],[`1 (${esc(o.ev)})`,fneg,tp,f(100*tp/n1,1)],['<b>Overall</b>','','',`<b>${f(100*(tp+tn)/n,1)}</b>`]])
+      + note(`Outcome coded 1 = "${esc(o.ev)}", 0 = other values. ${rows.length-n} rows excluded for missing values. Converged in ${M.it+1} iterations.`);
+    if (!M.conv || M.b.some((b,k)=>Math.abs(b)>12 && ses[k]>50)) out+=warn('The model did not converge cleanly — possible (quasi-)complete separation. Coefficients and SEs may be unreliable.');
+    if (o.save){ const nm=saveCols(rows,idx,[[`${D.cols[o.y]}_prob`,M.pr]]); out+=note(`Saved new column: ${esc(nm[0])}.`); }
+    return out+`<div class="plots">${lineSVG(fx,[ty,fx],{xlab:'1 − specificity (false positive rate)',ylab:'Sensitivity',title:`ROC curve (AUC = ${f(auc)})`,names:['Model','Chance'],ymin:0,ymax:1,points:false})}</div>`
+      + report(`χ²(${dfm}) = ${f(lr,2)}, p ${pAPA(plr)}, Nagelkerke R² = ${f(nag,2)}`);
+  }},
+prop:{ g:'Categorical', name:'One-sample proportion test',
+  fields:[{k:'x',t:'col',label:'Variable',prefCat:true},{k:'ev',t:'level',of:'x',label:'Success value'},{k:'p0',t:'number',label:'Hypothesized proportion (p₀)',def:0.5},ALT,CONF],
+  run(o){
+    const s=strCol(o.x).filter(v=>v!=null), n=s.length, k=s.filter(v=>v===o.ev).length, p0=o.p0??0.5, conf=o.conf||0.95;
+    need(n>0,'No data.'); need(p0>0&&p0<1,'p₀ must be between 0 and 1.');
+    const ph=k/n; let pe;
+    if (o.alt==='greater'){ pe=0; for (let i=k;i<=n;i++) pe+=dbinom(i,n,p0); }
+    else if (o.alt==='less'){ pe=0; for (let i=0;i<=k;i++) pe+=dbinom(i,n,p0); }
+    else { const d=dbinom(k,n,p0); pe=0; for (let i=0;i<=n;i++){ const di=dbinom(i,n,p0); if (di<=d*(1+1e-7)) pe+=di; } }
+    pe=Math.min(1,pe);
+    const zz=(ph-p0)/Math.sqrt(p0*(1-p0)/n), al=1-conf, zq=normInv(1-al/2);
+    const cp=[k===0?0:betaInv(al/2,k,n-k+1), k===n?1:betaInv(1-al/2,k+1,n-k)];
+    const wc=(ph+zq*zq/(2*n))/(1+zq*zq/n), wh=zq*Math.sqrt(ph*(1-ph)/n+zq*zq/(4*n*n))/(1+zq*zq/n);
+    return table(['N','Successes','Proportion','p₀'],[[n,k,f(ph,4),p0]])
+      + table(['Test','Statistic','p'],[['Exact binomial test',`k = ${k}`,P(pe)],['z test (normal approximation)',`z = ${f(zz)}`,P(pZ(zz,o.alt))]])
+      + table([`${Math.round(conf*100)}% confidence interval`,'Lower','Upper'],[['Clopper–Pearson (exact)',f(cp[0],4),f(cp[1],4)],['Wilson score',f(wc-wh,4),f(wc+wh,4)]])
+      + note(`Success = "${esc(o.ev)}". H₁: p ${altText(o.alt,'','').trim()} ${p0}. Confidence intervals are two-sided.`)
+      + report(`${k}/${n} = ${f(ph,3)}, exact binomial p ${pAPA(pe)}`);
+  }},
+mcnemar:{ g:'Categorical', name:'McNemar test (paired)',
+  fields:[{k:'x',t:'col',label:'Variable 1 (e.g. before)',prefCat:true},{k:'y',t:'col',label:'Variable 2 (e.g. after)',prefCat:true,nth:1}],
+  run(o){
+    need(o.x!==o.y,'Choose two different variables.');
+    const a=strCol(o.x), b=strCol(o.y), ok=a.map((v,i)=>v!=null&&b[i]!=null);
+    const L=sortLevels([...new Set([...a.filter((_,i)=>ok[i]),...b.filter((_,i)=>ok[i])])]);
+    need(L.length===2,`Both variables must use the same 2 values (found ${L.length} distinct values: ${L.slice(0,5).map(esc).join(', ')}).`);
+    const O=[[0,0],[0,0]]; a.forEach((v,i)=>{ if (ok[i]) O[L.indexOf(v)][L.indexOf(b[i])]++; });
+    const B=O[0][1], C=O[1][0], m=B+C, N=O[0][0]+O[1][1]+m;
+    let pe=0; for (let i=0;i<=Math.min(B,C);i++) pe+=dbinom(i,m,0.5); pe=m?Math.min(1,2*pe):1;
+    const x2=m?(B-C)**2/m:NaN, x2c=m?(Math.max(0,Math.abs(B-C)-1))**2/m:NaN;
+    return table([`${cname(o.x)} \\ ${cname(o.y)}`,esc(L[0]),esc(L[1]),'Total'],[[`<b>${esc(L[0])}</b>`,O[0][0],B,O[0][0]+B],[`<b>${esc(L[1])}</b>`,C,O[1][1],C+O[1][1]],['<b>Total</b>',O[0][0]+C,B+O[1][1],N]])
+      + table(['Test','Value','df','p'],[['McNemar χ²',f(x2),1,P(chiUpper(x2,1))],['McNemar χ² (continuity-corrected)',f(x2c),1,P(chiUpper(x2c,1))],['Exact binomial test','','',P(pe)]])
+      + note(`${m} discordant pairs (${B} changed ${esc(L[0])} → ${esc(L[1])}, ${C} changed ${esc(L[1])} → ${esc(L[0])}). Exact test recommended when discordant pairs < 25.`)
+      + report(`McNemar χ²(1, N = ${N}) = ${f(x2c,2)}, p ${pAPA(chiUpper(x2c,1))}`);
+  }},
+alpha:{ g:'Scales & factors', name:"Reliability (Cronbach's α)",
+  fields:[{k:'vars',t:'nums',label:'Scale items (≥ 2)'}],
+  run(o){
+    need(o.vars.length>=2,'Select at least 2 items.');
+    const C=o.vars.map(numCol), k=C.length, M=C[0].map((_,i)=>C.map(c=>c[i])).filter(r=>r.every(Number.isFinite)), n=M.length;
+    need(n>=3,'Need at least 3 complete cases.');
+    const item=j=>M.map(r=>r[j]), v=o.vars.map((_,j)=>variance(item(j))), tot=M.map(sum), vt=variance(tot);
+    const al=k/(k-1)*(1-sum(v)/vt);
+    const rs=[]; for (let a=0;a<k;a++) for (let b=a+1;b<k;b++) rs.push(pearson(item(a),item(b)));
+    const rbar=mean(rs), ast=k*rbar/(1+(k-1)*rbar);
+    const rows=o.vars.map((jj,j)=>{ const it=item(j), rest=tot.map((t,i)=>t-it[i]);
+      const ad=k>2?(k-1)/(k-2)*(1-(sum(v)-v[j])/variance(rest)):NaN;
+      return [cname(jj),f(mean(it)),f(sd(it)),f(pearson(it,rest)),f(ad)]; });
+    const lab=al>=0.9?'excellent':al>=0.8?'good':al>=0.7?'acceptable':al>=0.6?'questionable':al>=0.5?'poor':'unacceptable';
+    let out=table(["Cronbach's α",'Standardized α','Items','N','Mean inter-item r'],[[`<b>${f(al)}</b>`,f(ast),k,n,f(rbar)]])
+      + h5('Item statistics')+table(['Item','Mean','SD','Corrected item–total r','α if item deleted'],rows)
+      + note(`Rule of thumb: α ≥ .9 excellent, ≥ .8 good, ≥ .7 acceptable, ≥ .6 questionable, ≥ .5 poor. ${AR().length-n} rows excluded for missing values.`);
+    if (rows.some(r=>parseFloat(r[3])<0)) out+=warn('Some items correlate negatively with the rest of the scale — they may need reverse-scoring (use Compute, e.g. 6 - item).');
+    return out+report(`Cronbach's α = ${f(al,2)} (${lab}), ${k} items, N = ${n}`);
+  }},
+pca:{ g:'Scales & factors', name:'Principal component analysis',
+  fields:[{k:'vars',t:'nums',label:'Variables (≥ 3 recommended)'},{k:'ncomp',t:'number',label:'Components to extract',ph:'auto (eigenvalue > 1)'},{k:'rot',t:'select',label:'Rotation',options:[['varimax','Varimax'],['none','None (unrotated)']]},{k:'save',t:'check',label:'Save component scores as new columns'}],
+  run(o){
+    need(o.vars.length>=2,'Select at least 2 variables.');
+    const rows=AR(), C=o.vars.map(numCol), p=C.length, idx=C[0].map((_,i)=>i).filter(i=>C.every(c=>Number.isFinite(c[i]))), n=idx.length;
+    need(n>p,`Need more complete cases (${n}) than variables (${p}).`);
+    const mu=C.map(c=>mean(idx.map(i=>c[i]))), sg=C.map((c,j)=>sd(idx.map(i=>c[i])));
+    need(sg.every(s=>s>0),'A selected variable has zero variance.');
+    const Z=idx.map(i=>C.map((c,j)=>(c[i]-mu[j])/sg[j]));
+    const R=[...Array(p)].map((_,a)=>[...Array(p)].map((_,b)=>sum(Z.map(r=>r[a]*r[b]))/(n-1)));
+    const {values,vectors}=jacobiEig(R);
+    const m=o.ncomp>0?Math.min(p,Math.round(o.ncomp)):Math.max(1,values.filter(v=>v>1).length);
+    let L=o.vars.map((_,i)=>[...Array(m)].map((_,c)=>vectors[i][c]*Math.sqrt(Math.max(0,values[c]))));
+    const rotated=o.rot==='varimax'&&m>1; if (rotated) L=varimax(L);
+    const ss=[...Array(m)].map((_,c)=>sum(L.map(r=>r[c]**2))), ordc=ss.map((_,c)=>c).sort((a,b)=>ss[b]-ss[a]);
+    L=L.map(r=>ordc.map(c=>r[c]));
+    for (let c=0;c<m;c++) if (sum(L.map(r=>r[c]))<0) L.forEach(r=>{ r[c]=-r[c]; });
+    const ssl=ordc.map(c=>ss[c]), Ri=matInv(R);
+    let kmo=NaN; if (Ri){ let r2=0,a2=0; for (let i=0;i<p;i++) for (let j=0;j<p;j++) if (i!==j){ r2+=R[i][j]**2; a2+=(Ri[i][j]/Math.sqrt(Ri[i][i]*Ri[j][j]))**2; } kmo=r2/(r2+a2); }
+    const ldet=sum(values.map(v=>Math.log(Math.max(v,1e-300)))), bchi=-(n-1-(2*p+5)/6)*ldet, bdf=p*(p-1)/2;
+    let cum=0;
+    const comp=c=>`${rotated?'RC':'PC'}${c+1}`;
+    let out=h5('Suitability')+table(['KMO measure of sampling adequacy',"Bartlett's χ²",'df','p'],[[f(kmo),f(bchi),bdf,P(chiUpper(bchi,bdf))]])
+      + h5('Eigenvalues')+table(['Component','Eigenvalue','% of variance','Cumulative %'],values.map((v,c)=>{ cum+=v; return [`${c<m?'<b>':''}PC${c+1}${c<m?'</b>':''}`,f(v),f(100*v/p,2),f(100*cum/p,2)]; }))
+      + h5(`Loadings (${m} component${m>1?'s':''}${rotated?', varimax rotation':''})`)
+      + `<table class="res"><thead><tr><th>Variable</th>${[...Array(m)].map((_,c)=>`<th>${comp(c)}</th>`).join('')}<th>Communality</th></tr></thead><tbody>`
+      + o.vars.map((j,i)=>`<tr><td>${cname(j)}</td>${L[i].map(v=>`<td class="${Math.abs(v)>=0.4?'hi':''}">${f(v)}</td>`).join('')}<td>${f(sum(L[i].map(v=>v*v)))}</td></tr>`).join('')
+      + `<tr><td><i>SS loadings</i></td>${ssl.map(v=>`<td>${f(v)}</td>`).join('')}<td></td></tr><tr><td><i>% of variance</i></td>${ssl.map(v=>`<td>${f(100*v/p,2)}</td>`).join('')}<td></td></tr></tbody></table>`
+      + note('Analysis of the correlation matrix (standardized variables). Loadings with |value| ≥ 0.40 are bold. KMO ≥ .6 and a significant Bartlett test suggest the data are suitable.');
+    if (o.save){ need(Ri,'Cannot compute scores: the correlation matrix is singular.');
+      const W=o.vars.map((_,a)=>[...Array(m)].map((_,c)=>sum(o.vars.map((_,b)=>Ri[a][b]*L[b][c]))));
+      const sc=[...Array(m)].map((_,c)=>Z.map(z=>sum(z.map((v,a)=>v*W[a][c]))));
+      const nm=saveCols(rows,idx,sc.map((v,c)=>[comp(c),v])); out+=note(`Saved component scores (regression method): ${nm.map(esc).join(', ')}.`); }
+    return out+`<div class="plots">${lineSVG(values.map((_,i)=>i+1),[values],{xlab:'Component',ylab:'Eigenvalue',title:'Scree plot',hline:1,ymin:0})}</div>`;
+  }},
+power:{ g:'Planning', name:'Power & sample size', noData:true,
+  fields:[{k:'test',t:'select',label:'Test',options:[['t2','Independent-samples t-test'],['t1','One-sample or paired t-test'],['r','Correlation (Pearson r)']]},
+    {k:'solve',t:'select',label:'Calculate',options:[['n','Required sample size'],['power','Power for a given sample size']]},
+    {k:'es',t:'number',label:"Effect size (Cohen's d; r for correlation)",def:0.5},
+    {k:'alpha',t:'number',label:'Significance level (α)',def:0.05},
+    {k:'tails',t:'select',label:'Tails',options:[['2','Two-sided'],['1','One-sided']]},
+    {k:'pw',t:'number',label:'Target power (when calculating sample size)',def:0.8},
+    {k:'n',t:'number',label:'Sample size — per group for independent t (when calculating power)',def:30}],
+  run(o){
+    const es=Math.abs(o.es??0), a=o.alpha, tails=+o.tails, isR=o.test==='r';
+    need(es>0,'Effect size must be non-zero.'); need(!isR||es<1,'r must be between −1 and 1.'); need(a>0&&a<0.5,'α must be between 0 and 0.5.');
+    const pow=n=>{
+      if (isR){ if (n<4) return 0; const z=Math.atanh(es)*Math.sqrt(n-3), zc=normInv(1-a/tails); return tails===2?Phi(z-zc)+Phi(-z-zc):Phi(z-zc); }
+      const df=o.test==='t2'?2*n-2:n-1; if (df<1) return 0; const dl=es*Math.sqrt(o.test==='t2'?n/2:n);
+      if (tails===2){ const tc=tinv(1-a/2,df); return 1-nctcdf(tc,df,dl)+nctcdf(-tc,df,dl); }
+      return 1-nctcdf(tinv(1-a,df),df,dl);
+    };
+    let n;
+    if (o.solve==='n'){
+      need(o.pw>a&&o.pw<1,'Target power must be between α and 1.');
+      let lo=isR?4:2, hi=lo; while (pow(hi)<o.pw){ lo=hi; hi*=2; need(hi<5e6,'Required sample size is too large.'); }
+      while (hi-lo>1){ const mid=Math.floor((lo+hi)/2); if (pow(mid)>=o.pw) hi=mid; else lo=mid; }
+      n=pow(lo)>=o.pw?lo:hi;
+    } else { n=Math.round(o.n??0); need(n>=(isR?4:2),'Sample size is too small.'); }
+    const pw=pow(n), lab=o.test==='t2'?'n per group':'N', tot=o.test==='t2'?2*n:n;
+    const ns=[]; const top=Math.max(n*2,10); for (let i=0;i<=40;i++){ const v=Math.max(isR?4:2,Math.round(top*i/40)); if (!ns.includes(v)) ns.push(v); }
+    return table(['Test','Effect size','α','Tails',lab,'Total N','Power'],[[({t2:'Independent t',t1:'One-sample / paired t',r:'Correlation'})[o.test],f(es,3),a,tails,`<b>${n}</b>`,tot,`<b>${f(pw,4)}</b>`]])
+      + note(isR?'Uses the Fisher z approximation. Conventions: r = 0.1 small, 0.3 medium, 0.5 large.':"Exact power from the noncentral t distribution. Conventions: d = 0.2 small, 0.5 medium, 0.8 large.")
+      + `<div class="plots">${lineSVG(ns,[ns.map(pow)],{xlab:lab,ylab:'Power',title:'Power curve',hline:o.solve==='n'?o.pw:null,ymin:0,ymax:1,points:false})}</div>`
+      + report(o.solve==='n'?`To detect ${isR?'r':'d'} = ${f(es,2)} with ${Math.round(o.pw*100)}% power at α = ${a} (${tails===2?'two':'one'}-sided), you need ${lab} = ${n}${o.test==='t2'?` (total ${tot})`:''}.`:`With ${lab} = ${n}, power = ${f(pw,3)}.`);
+  }},
 };
 
 /* ================= Dialogs ================= */
@@ -943,6 +1402,7 @@ function fieldHTML(fd){
     case 'number': return `<label class="f">${fd.label}<input type="number" step="any" name="${fd.k}" value="${fd.def??''}" placeholder="${fd.ph||''}"></label>`;
     case 'select': return `<label class="f">${fd.label}<select name="${fd.k}">${fd.options.map(([v,l])=>`<option value="${v}">${l}</option>`).join('')}</select></label>`;
     case 'check': return `<label class="ck"><input type="checkbox" name="${fd.k}"${fd.def?' checked':''}>${fd.label}</label>`;
+    case 'level': return `<label class="f">${fd.label}<select name="${fd.k}" data-of="${fd.of}"></select></label>`;
   }
 }
 function readForm(fields){
@@ -958,13 +1418,19 @@ function readForm(fields){
 }
 function openAnalysis(key){
   const A=AN[key];
-  if (!D.cols.length){ alert('Load or enter some data first (Data tab).'); return; }
-  if (A.fields.some(fd=>fd.t==='num'||fd.t==='nums') && !D.cols.some((_,j)=>colIsNum(j))){ alert('This analysis needs at least one numeric column.'); return; }
+  if (!A.noData && !D.cols.length){ alert('Load or enter some data first (Data tab).'); return; }
+  if (!A.noData && A.fields.some(fd=>fd.t==='num'||fd.t==='nums') && !D.cols.some((_,j)=>colIsNum(j))){ alert('This analysis needs at least one numeric column.'); return; }
   openDialog(A.name, A.fields.map(fieldHTML).join(''), 'Run', ()=>{
     const o=readForm(A.fields);
     if (o.conf!=null) need(o.conf>0&&o.conf<1,'Confidence level must be between 0 and 1 (e.g. 0.95).');
-    addResult(A.name, A.run(o));
+    addResult(A.name, A.run(o), !A.noData);
   });
+  for (const sel of $('#dlgBody').querySelectorAll('select[data-of]')){ // value pickers that follow a column choice
+    const src=$('#dlgForm').elements[sel.dataset.of];
+    const fill=()=>{ const lv=sortLevels([...new Set(strCol(+src.value).filter(v=>v!=null))]);
+      sel.innerHTML=lv.slice(0,300).map(v=>`<option>${esc(v)}</option>`).join(''); if (lv.length) sel.value=lv.includes('Yes')?'Yes':lv.includes('1')?'1':lv[lv.length-1]; };
+    src.addEventListener('change',fill); fill();
+  }
 }
 function openPaste(){
   openDialog('Paste data', `<span class="hint">Paste from Excel, Google Sheets or a CSV/TSV file. The delimiter is detected automatically.</span>
@@ -976,40 +1442,94 @@ function openPaste(){
 }
 function openCompute(){
   need2();
-  const ids=D.cols.map(c=>c.replace(/\W+/g,'_').replace(/^(\d)/,'_$1'));
   openDialog('Compute new column', `<label class="f">New column name<input name="nm" value="${uniqueName('computed')}"></label>
     <label class="f">Expression<input name="ex" placeholder="e.g. weight_kg / (height_cm/100)**2" autocomplete="off"></label>
-    <span class="hint">Evaluated for each row. Variables: ${ids.map(i=>`<code>${esc(i)}</code>`).join(', ')}. Functions: log, log10, exp, sqrt, abs, round, floor, ceil, min, max, pow, sin, cos… Use <code>cond ? a : b</code> for conditions. Missing values give empty cells.</span>`, 'Compute', ()=>{
+    <span class="hint">Evaluated for each row. ${varHint()} Use <code>cond ? a : b</code> for conditions. Missing values give empty cells.</span>`, 'Compute', ()=>{
     const F=$('#dlgForm'), ex=F.elements.ex.value.trim(); need(ex,'Enter an expression.');
-    let fn; try { fn=new Function('M','v',`with(M){ const [${ids.join(',')}]=v; return (${ex}); }`); } catch(e){ throw new Error('Syntax error: '+e.message); }
-    const nums=D.cols.map((_,j)=>colIsNum(j)), M=Object.create(null);
-    for (const k of Object.getOwnPropertyNames(Math)) M[k]=Math[k];
-    M.ln=Math.log;
+    const fn=compileExpr(ex);
     const out=D.rows.map(r=>{
-      const v=r.map((x,j)=>nums[j]?toNum(x):(isMiss(x)?null:x));
-      let res; try { res=fn(M,v); } catch(e){ throw new Error('Error evaluating expression: '+e.message); }
+      const res=fn(r);
       if (res==null || (typeof res==='number' && !Number.isFinite(res))) return '';
       if (typeof res==='boolean') return res?'1':'0';
       return typeof res==='number' ? String(+res.toPrecision(12)) : String(res);
     });
-    D.cols.push(uniqueName(F.elements.nm.value.trim()||'computed')); D.rows.forEach((r,i)=>r.push(out[i])); dataChanged(true);
+    snap(); D.cols.push(uniqueName(F.elements.nm.value.trim()||'computed')); D.rows.forEach((r,i)=>r.push(out[i])); dataChanged(true);
+  });
+}
+const varHint = () => `Variables: ${exprIds().map(i=>`<code>${esc(i)}</code>`).join(', ')}. Functions: log, ln, log10, exp, sqrt, abs, round, floor, ceil, min, max, pow, isNA(x)…`;
+function openFilter(){
+  need2();
+  openDialog('Filter rows (select cases)', `<label class="f">Keep rows where<input name="ex" value="${esc(D.filter||'')}" placeholder="e.g. age >= 30 && sex == 'F'" autocomplete="off"></label>
+    <span class="hint">Analyses use only rows where the expression is true; other rows are dimmed in the grid. Leave empty to remove the filter. ${varHint()}</span>`, 'Apply', ()=>{
+    const ex=$('#dlgForm').elements.ex.value.trim();
+    if (ex){ const fn=compileExpr(ex); const n=D.rows.filter(r=>fn(r)).length; need(n>0,'No rows match this expression.'); }
+    snap(); D.filter=ex||undefined; dataChanged(true);
+  });
+}
+function openSort(){
+  need2();
+  openDialog('Sort rows', `<label class="f">Sort by<select name="c">${D.cols.map((c,j)=>`<option value="${j}">${esc(c)}</option>`).join('')}</select></label>
+    <label class="f">Order<select name="o"><option value="1">Ascending</option><option value="-1">Descending</option></select></label>`, 'Sort', ()=>{
+    const F=$('#dlgForm'), j=+F.elements.c.value, dir=+F.elements.o.value, num=colIsNum(j);
+    snap();
+    D.rows.sort((a,b)=>{ const ma=isMiss(a[j]), mb=isMiss(b[j]); if (ma||mb) return ma-mb;
+      return dir*(num ? toNum(a[j])-toNum(b[j]) : String(a[j]).localeCompare(String(b[j]),undefined,{numeric:true})); });
+    dataChanged(true);
+  });
+}
+function openRecode(){
+  need2();
+  openDialog('Recode values', `<label class="f">Source column<select name="c">${D.cols.map((c,j)=>`<option value="${j}">${esc(c)}</option>`).join('')}</select></label>
+    <label class="f">Rules (one per line)<textarea name="rules" rows="6" style="font-family:ui-monospace,monospace;font-size:12px" placeholder="M = Male&#10;F = Female&#10;18 - 29.999 = young&#10;30 - highest = older&#10;else = other"></textarea></label>
+    <span class="hint"><code>old = new</code> for exact values; <code>lo - hi = new</code> for numeric ranges (inclusive; <code>lowest</code>/<code>highest</code> allowed); <code>else = new</code> for everything else. Missing values stay missing.</span>
+    <label class="f">New column name<input name="nm" placeholder="(defaults to source name + _r)"></label>
+    <label class="ck"><input type="checkbox" name="keep" checked>Keep unmatched values unchanged (when no <code>else</code> rule)</label>`, 'Recode', ()=>{
+    const F=$('#dlgForm'), j=+F.elements.c.value, rules=[]; let other=null;
+    for (const line of F.elements.rules.value.split('\n')){
+      const t=line.trim(); if (!t) continue;
+      const eq=t.lastIndexOf('='); need(eq>0,`Rule "${t}" needs an "=".`);
+      const lhs=t.slice(0,eq).trim(), rhs=t.slice(eq+1).trim();
+      const rg=lhs.match(/^(lowest|-?[\d.]+(?:e-?\d+)?)\s+-\s+(highest|-?[\d.]+(?:e-?\d+)?)$/i);
+      if (/^else$/i.test(lhs)) other=rhs;
+      else if (rg) rules.push({lo:/lowest/i.test(rg[1])?-Infinity:+rg[1], hi:/highest/i.test(rg[2])?Infinity:+rg[2], v:rhs});
+      else rules.push({eq:lhs, v:rhs});
+    }
+    need(rules.length||other!=null,'Enter at least one rule.');
+    const keep=F.elements.keep.checked;
+    const out=D.rows.map(r=>{ const x=r[j]; if (isMiss(x)) return ''; const s=String(x).trim(), n=toNum(x);
+      for (const R of rules){ if (R.eq!=null ? R.eq===s : (Number.isFinite(n) && n>=R.lo && n<=R.hi)) return R.v; }
+      return other!=null ? other : keep ? s : ''; });
+    snap(); D.cols.push(uniqueName(F.elements.nm.value.trim()||`${D.cols[j]}_r`)); D.rows.forEach((r,i)=>r.push(out[i])); dataChanged(true);
   });
 }
 function need2(){ if (!D.cols.length){ alert('Load some data first.'); throw new Error('no data'); } }
 
 /* ================= Results ================= */
-function addResult(title, html){
+function addResult(title, html, useData=true){
   const el=document.createElement('article'); el.className='card';
-  el.innerHTML=`<header><h3>${esc(title)}</h3><span class="meta">${new Date().toLocaleString()}</span><button class="x" title="Remove">×</button></header><div class="body">${html}</div>`;
+  const flt = useData && D.filter && MASK ? `Filter: <code>${esc(D.filter)}</code> (n = ${MASK.filter(Boolean).length}) · ` : '';
+  el.innerHTML=`<header><h3>${esc(title)}</h3><span class="meta">${flt}${new Date().toLocaleString()}</span><button class="copy" title="Copy tables as tab-separated text (paste into Excel/Word)">Copy</button><button class="x" title="Remove">×</button></header><div class="body">${html}</div>`;
   $('#results').prepend(el); saveResults(); showTab('results'); window.scrollTo({top:0});
 }
-$('#results').addEventListener('click', e=>{ if (e.target.matches('.card>header .x')){ e.target.closest('.card').remove(); saveResults(); } });
+$('#results').addEventListener('click', e=>{
+  if (e.target.matches('.card>header .x')){ e.target.closest('.card').remove(); saveResults(); }
+  else if (e.target.matches('.card>header .copy')){
+    const card=e.target.closest('.card'), parts=[card.querySelector('h3').textContent];
+    for (const el of card.querySelectorAll('.body > h5, .body > table, .body > .note, .body > .report, .body > .warn')){
+      if (el.tagName==='TABLE') parts.push([...el.rows].map(r=>[...r.cells].map(c=>c.innerText.replace(/\s*\n\s*/g,' ').trim()).join('\t')).join('\n'));
+      else parts.push(el.innerText.trim());
+    }
+    const txt=parts.join('\n\n'), btn=e.target;
+    const done=()=>{ btn.textContent='Copied ✓'; setTimeout(()=>btn.textContent='Copy',1400); };
+    if (navigator.clipboard) navigator.clipboard.writeText(txt).then(done,()=>alert('Clipboard not available.'));
+  }
+});
 function saveResults(){ $('#rcount').textContent=$('#results').children.length||''; store.set('statbench.results', $('#results').innerHTML); }
 $('#bClearRes').onclick=()=>{ if ($('#results').children.length && confirm('Remove all results?')){ $('#results').innerHTML=''; saveResults(); } };
 $('#bPrint').onclick=()=>window.print();
 $('#bSaveRes').onclick=()=>{
   const css=document.querySelector('style').textContent, theme=document.documentElement.dataset.theme||'';
-  download('statbench-results.html', `<!doctype html><html lang="en"${theme?` data-theme="${theme}"`:''}><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>StatBench results</title><style>${css} main{max-width:980px;margin:0 auto}.card .x{display:none}</style></head><body><main><div id="results">${$('#results').innerHTML}</div></main></body></html>`, 'text/html');
+  download('statbench-results.html', `<!doctype html><html lang="en"${theme?` data-theme="${theme}"`:''}><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>StatBench results</title><style>${css} main{max-width:980px;margin:0 auto}.card .x,.card .copy{display:none}</style></head><body><main><div id="results">${$('#results').innerHTML}</div></main></body></html>`, 'text/html');
 };
 
 /* ================= Shell ================= */
@@ -1019,9 +1539,9 @@ function showTab(t){
 }
 document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>showTab(b.dataset.tab));
 (function buildSide(){
-  let h='', last='';
-  for (const [k,A] of Object.entries(AN)){ if (A.g!==last){ h+=`<h4>${A.g}</h4>`; last=A.g; } h+=`<button data-an="${k}">${A.name}</button>`; }
-  $('#side').innerHTML=h;
+  const groups=new Map();
+  for (const [k,A] of Object.entries(AN)){ if (!groups.has(A.g)) groups.set(A.g,[]); groups.get(A.g).push(`<button data-an="${k}">${A.name}</button>`); }
+  $('#side').innerHTML=[...groups].map(([g,b])=>`<h4>${g}</h4>${b.join('')}`).join('');
   $('#side').addEventListener('click', e=>{ const b=e.target.closest('[data-an]'); if (b) openAnalysis(b.dataset.an); });
 })();
 const THEMES=['auto','light','dark'];
@@ -1033,7 +1553,7 @@ $('#themeBtn').onclick=()=>applyTheme(THEMES[(THEMES.indexOf(store.get('statbenc
 applyTheme(store.get('statbench.theme')||'auto');
 try { const s=JSON.parse(store.get('statbench.data')||'null'); if (s && Array.isArray(s.cols) && Array.isArray(s.rows)) D=s; } catch {}
 const savedRes=store.get('statbench.results'); if (savedRes) $('#results').innerHTML=savedRes;
-saveResults(); renderData();
+saveResults(); dataChanged(true);
 </script>
 </body>
 </html>
