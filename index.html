@@ -1,0 +1,1039 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>StatBench</title>
+<style>
+:root{
+  --bg:#f5f6f8;--panel:#ffffff;--panel2:#f0f2f5;--text:#1b1f24;--muted:#5d6670;--border:#dde1e6;
+  --accent:#2563eb;--accent-soft:#e3ebfd;--accent2:#d9480f;--sig:#0f7b3f;--danger:#c92a2a;--grid:#e8ebef;
+  --shadow:0 1px 2px rgba(0,0,0,.05),0 4px 14px rgba(0,0,0,.04);color-scheme:light;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#101317;--panel:#171b21;--panel2:#1f242b;--text:#e5e8ec;--muted:#98a2ad;--border:#2b323a;
+  --accent:#6d9cff;--accent-soft:#1d2942;--accent2:#ff8a4c;--sig:#4cc38a;--danger:#ff6b6b;--grid:#252b32;
+  --shadow:0 1px 2px rgba(0,0,0,.4);color-scheme:dark;}}
+:root[data-theme="dark"]{
+  --bg:#101317;--panel:#171b21;--panel2:#1f242b;--text:#e5e8ec;--muted:#98a2ad;--border:#2b323a;
+  --accent:#6d9cff;--accent-soft:#1d2942;--accent2:#ff8a4c;--sig:#4cc38a;--danger:#ff6b6b;--grid:#252b32;
+  --shadow:0 1px 2px rgba(0,0,0,.4);color-scheme:dark;}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{background:var(--bg);color:var(--text);font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+button,input,select,textarea{font:inherit;color:inherit}
+button{cursor:pointer;background:var(--panel);border:1px solid var(--border);border-radius:7px;padding:6px 12px}
+button:hover{border-color:var(--accent)}
+button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+button.ghost{background:transparent;border-color:transparent}
+button.danger:hover{border-color:var(--danger);color:var(--danger)}
+input,select,textarea{background:var(--panel);border:1px solid var(--border);border-radius:6px;padding:6px 8px}
+input:focus,select:focus,textarea:focus{outline:2px solid var(--accent);outline-offset:-1px;border-color:transparent}
+
+.top{display:flex;align-items:center;gap:16px;padding:10px 16px;background:var(--panel);border-bottom:1px solid var(--border);position:sticky;top:0;z-index:5}
+.brand{font-weight:700;font-size:16px;letter-spacing:-.01em;display:flex;align-items:center;gap:8px}
+.brand svg{color:var(--accent)}
+.tabs{display:flex;gap:4px}
+.tabs button{border:none;background:transparent;padding:6px 14px;border-radius:7px;color:var(--muted)}
+.tabs button.on{background:var(--accent-soft);color:var(--accent);font-weight:600}
+.spacer{flex:1}
+.count{display:inline-block;min-width:18px;padding:0 5px;border-radius:9px;background:var(--accent);color:#fff;font-size:11px;line-height:18px;text-align:center}
+.count:empty{display:none}
+
+.app{display:grid;grid-template-columns:230px 1fr;min-height:calc(100vh - 53px)}
+.side{background:var(--panel);border-right:1px solid var(--border);padding:12px 10px;overflow:auto}
+.side h4{margin:14px 8px 4px;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:600}
+.side h4:first-child{margin-top:2px}
+.side button{display:block;width:100%;text-align:left;border:none;background:transparent;padding:6px 10px;border-radius:6px}
+.side button:hover{background:var(--panel2)}
+main{min-width:0;padding:16px}
+.toolbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px}
+.toolbar .info{color:var(--muted);margin-left:auto;font-size:13px}
+
+.tablewrap{background:var(--panel);border:1px solid var(--border);border-radius:10px;overflow:auto;max-height:calc(100vh - 140px);box-shadow:var(--shadow)}
+table.data{border-collapse:separate;border-spacing:0;font-variant-numeric:tabular-nums}
+table.data th,table.data td{border-right:1px solid var(--border);border-bottom:1px solid var(--border);padding:0}
+table.data thead th{position:sticky;top:0;background:var(--panel2);z-index:2}
+table.data .rn{position:sticky;left:0;background:var(--panel2);color:var(--muted);font-size:12px;text-align:right;padding:0 6px;min-width:46px;z-index:1}
+table.data thead .rn{z-index:3}
+table.data td input{border:none;border-radius:0;background:transparent;width:120px;padding:5px 8px}
+table.data td input:focus{outline:2px solid var(--accent);background:var(--accent-soft)}
+.colhead{display:flex;align-items:center;gap:4px;padding:4px 4px 4px 6px}
+.colhead input{width:104px;font-weight:600;border:1px solid transparent;background:transparent;padding:3px 4px}
+.colhead input:hover{border-color:var(--border)}
+.badge{font-size:10px;padding:1px 5px;border-radius:4px;font-weight:600;font-family:ui-monospace,monospace}
+.badge.n{background:var(--accent-soft);color:var(--accent)}
+.badge.t{background:var(--panel);color:var(--accent2);border:1px solid var(--border)}
+.x{border:none;background:transparent;color:var(--muted);padding:0 5px;font-size:15px;line-height:1}
+.x:hover{color:var(--danger)}
+.rn .x{visibility:hidden;margin-right:2px}
+tr:hover .rn .x{visibility:visible}
+.empty{padding:56px 24px;text-align:center;color:var(--muted)}
+.empty h2{color:var(--text);margin:0 0 6px;font-size:20px}
+.empty .row{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-top:18px}
+
+#results{display:flex;flex-direction:column;gap:14px}
+.card{background:var(--panel);border:1px solid var(--border);border-radius:10px;box-shadow:var(--shadow);overflow:hidden}
+.card>header{display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--border);background:var(--panel2)}
+.card>header h3{margin:0;font-size:15px}
+.card>header .meta{color:var(--muted);font-size:12px;margin-left:auto}
+.card .body{padding:14px;overflow-x:auto}
+.card h5{margin:16px 0 6px;font-size:13px;color:var(--muted);font-weight:600}
+.card h5:first-child{margin-top:0}
+table.res{border-collapse:collapse;margin:2px 0 10px;font-variant-numeric:tabular-nums;font-size:13px}
+table.res th,table.res td{padding:5px 12px;text-align:right;border-bottom:1px solid var(--border);white-space:nowrap}
+table.res th{font-weight:600;border-bottom:2px solid var(--text);vertical-align:bottom}
+table.res th:first-child,table.res td:first-child{text-align:left}
+table.res tr:last-child td{border-bottom:2px solid var(--text)}
+table.res .sub{font-weight:400;font-size:11px;color:var(--muted)}
+td.sig{color:var(--sig);font-weight:600}
+table.corr td{text-align:center;line-height:1.2}
+table.corr td small{display:block;color:var(--muted);font-size:10.5px}
+.note{color:var(--muted);font-size:12.5px;margin:4px 0}
+.report{margin-top:10px;padding:8px 12px;border-left:3px solid var(--accent);background:var(--accent-soft);border-radius:0 6px 6px 0;font-size:13px}
+.warn{margin-top:8px;padding:8px 12px;border-left:3px solid var(--accent2);background:var(--panel2);border-radius:0 6px 6px 0;font-size:13px}
+.plots{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:12px;margin-top:8px}
+svg.plot{width:100%;max-width:640px;height:auto;display:block}
+svg.plot text{fill:var(--muted);font-size:11px;font-family:inherit}
+svg.plot .ttl{fill:var(--text);font-weight:600;font-size:12px}
+svg.plot .grid{stroke:var(--grid)}
+svg.plot .axis{stroke:var(--border)}
+svg.plot .bar{fill:var(--accent);opacity:.85}
+svg.plot .bar:hover{opacity:1}
+svg.plot .pt{fill:var(--accent);fill-opacity:.6;stroke:var(--panel);stroke-width:.8}
+svg.plot .line{stroke:var(--accent2);stroke-width:2;fill:none}
+svg.plot .ref{stroke:var(--muted);stroke-dasharray:4 4;fill:none}
+svg.plot .box{fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5}
+svg.plot .med{stroke:var(--accent);stroke-width:2.5}
+svg.plot .whisk{stroke:var(--accent);stroke-width:1.3}
+svg.plot .out{fill:none;stroke:var(--accent2);stroke-width:1.3}
+svg.plot .mean{fill:var(--accent2)}
+
+dialog{border:1px solid var(--border);border-radius:12px;padding:0;background:var(--panel);color:var(--text);width:min(520px,calc(100vw - 32px));box-shadow:0 20px 60px rgba(0,0,0,.3)}
+dialog::backdrop{background:rgba(10,14,20,.45)}
+dialog form{display:flex;flex-direction:column;max-height:85vh}
+dialog .dh{padding:14px 18px;border-bottom:1px solid var(--border);font-weight:700;font-size:15px}
+dialog .db{padding:14px 18px;overflow:auto;display:flex;flex-direction:column;gap:12px}
+dialog .df{padding:12px 18px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px}
+dialog label.f{display:flex;flex-direction:column;gap:4px;font-size:13px;font-weight:600}
+dialog label.f>*{font-weight:400}
+dialog fieldset{border:1px solid var(--border);border-radius:8px;padding:8px 10px;margin:0}
+dialog legend{font-size:13px;font-weight:600;padding:0 4px}
+.checks{display:flex;flex-wrap:wrap;gap:4px 14px;max-height:180px;overflow:auto}
+label.ck{display:flex;align-items:center;gap:6px;font-size:13px;font-weight:400}
+.err{color:var(--danger);font-size:13px}
+.err:empty{display:none}
+.hint{color:var(--muted);font-size:12px;font-weight:400}
+textarea.paste{width:100%;min-height:200px;font-family:ui-monospace,monospace;font-size:12px}
+
+@media (max-width:760px){
+  .app{grid-template-columns:1fr}
+  .side{border-right:none;border-bottom:1px solid var(--border);display:flex;flex-wrap:wrap;gap:2px;padding:8px}
+  .side h4{width:100%;margin:6px 4px 0}
+  .side button{width:auto;background:var(--panel2)}
+  .top{gap:8px;flex-wrap:wrap}
+}
+@media print{
+  .top,.side,.toolbar,#tab-data,.card .x{display:none!important}
+  .app{display:block}
+  #tab-results{display:block!important}
+  .card{break-inside:avoid;box-shadow:none}
+}
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="brand"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>StatBench</div>
+  <nav class="tabs">
+    <button data-tab="data" class="on">Data</button>
+    <button data-tab="results">Results <span class="count" id="rcount"></span></button>
+  </nav>
+  <div class="spacer"></div>
+  <button class="ghost" id="themeBtn" title="Toggle theme">Theme: Auto</button>
+</header>
+
+<div class="app">
+  <aside class="side" id="side"></aside>
+  <main>
+    <section id="tab-data">
+      <div class="toolbar">
+        <button id="bImport">Import CSV…</button>
+        <button id="bPaste">Paste data…</button>
+        <button id="bSample">Sample data</button>
+        <button id="bAddRow">+ Row</button>
+        <button id="bAddCol">+ Column</button>
+        <button id="bCompute">Compute column…</button>
+        <button id="bExport">Export CSV</button>
+        <button id="bClear" class="danger">Clear</button>
+        <span class="info" id="dataInfo"></span>
+        <input type="file" id="file" accept=".csv,.tsv,.txt,text/csv" hidden>
+      </div>
+      <div class="tablewrap" id="tableWrap"></div>
+    </section>
+    <section id="tab-results" hidden>
+      <div class="toolbar">
+        <button id="bSaveRes">Export results (HTML)</button>
+        <button id="bPrint">Print / PDF</button>
+        <button id="bClearRes" class="danger">Clear results</button>
+      </div>
+      <div id="results"></div>
+    </section>
+  </main>
+</div>
+
+<dialog id="dlg"><form method="dialog" id="dlgForm">
+  <div class="dh" id="dlgTitle"></div>
+  <div class="db" id="dlgBody"></div>
+  <div class="df"><span class="err" id="dlgErr" style="margin-right:auto"></span><button value="cancel" formnovalidate>Cancel</button><button class="primary" value="ok" id="dlgOk">Run</button></div>
+</form></dialog>
+
+<script>
+'use strict';
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const store = {
+  get(k){ try { return localStorage.getItem(k); } catch { return null; } },
+  set(k,v){ try { localStorage.setItem(k,v); } catch {} }
+};
+
+/* ================= Distributions & special functions ================= */
+const LG = [0.99999999999980993,676.5203681218851,-1259.1392167224028,771.32342877765313,-176.61502916214059,12.507343278686905,-0.13857109526572012,9.9843695780195716e-6,1.5056327351493116e-7];
+function lgamma(x){
+  if (x < 0.5) return Math.log(Math.PI/Math.abs(Math.sin(Math.PI*x))) - lgamma(1-x);
+  x -= 1; let a = LG[0]; const t = x + 7.5;
+  for (let i = 1; i < 9; i++) a += LG[i]/(x+i);
+  return 0.5*Math.log(2*Math.PI) + (x+0.5)*Math.log(t) - t + Math.log(a);
+}
+const lchoose = (n,k) => lgamma(n+1) - lgamma(k+1) - lgamma(n-k+1);
+function betacf(a,b,x){
+  const FP = 1e-300; let qab=a+b, qap=a+1, qam=a-1, c=1, d=1-qab*x/qap;
+  if (Math.abs(d)<FP) d=FP; d=1/d; let h=d;
+  for (let m=1; m<=400; m++){
+    const m2=2*m; let aa=m*(b-m)*x/((qam+m2)*(a+m2));
+    d=1+aa*d; if(Math.abs(d)<FP)d=FP; c=1+aa/c; if(Math.abs(c)<FP)c=FP; d=1/d; h*=d*c;
+    aa=-(a+m)*(qab+m)*x/((a+m2)*(qap+m2));
+    d=1+aa*d; if(Math.abs(d)<FP)d=FP; c=1+aa/c; if(Math.abs(c)<FP)c=FP; d=1/d;
+    const del=d*c; h*=del; if (Math.abs(del-1)<3e-15) break;
+  }
+  return h;
+}
+function ibeta(x,a,b){ // regularized incomplete beta I_x(a,b)
+  if (!(x>0)) return 0; if (x>=1) return 1;
+  const bt = Math.exp(lgamma(a+b)-lgamma(a)-lgamma(b)+a*Math.log(x)+b*Math.log(1-x));
+  return x < (a+1)/(a+b+2) ? bt*betacf(a,b,x)/a : 1 - bt*betacf(b,a,1-x)/b;
+}
+function gammaQ(a,x){ // upper regularized incomplete gamma
+  if (!(x>0)) return 1; if (x===Infinity) return 0;
+  const lf = -x + a*Math.log(x) - lgamma(a);
+  if (x < a+1){
+    let ap=a, sum=1/a, del=sum;
+    for (let n=0; n<1000; n++){ ap++; del*=x/ap; sum+=del; if (Math.abs(del)<Math.abs(sum)*1e-16) break; }
+    return 1 - sum*Math.exp(lf);
+  }
+  let b=x+1-a, c=1e300, d=1/b, h=d;
+  for (let i=1; i<1000; i++){
+    const an=-i*(i-a); b+=2; d=an*d+b; if(Math.abs(d)<1e-300)d=1e-300;
+    c=b+an/c; if(Math.abs(c)<1e-300)c=1e-300; d=1/d; const del=d*c; h*=del; if(Math.abs(del-1)<1e-16) break;
+  }
+  return Math.exp(lf)*h;
+}
+const Phi = z => z===Infinity?1:z===-Infinity?0: z<0 ? 0.5*gammaQ(0.5,z*z/2) : 1-0.5*gammaQ(0.5,z*z/2);
+const normPdf = z => Math.exp(-z*z/2)/Math.sqrt(2*Math.PI);
+function normInv(p){ // Acklam with one Newton refinement
+  if (p<=0) return -Infinity; if (p>=1) return Infinity;
+  const a=[-39.69683028665376,220.9460984245205,-275.9285104469687,138.357751867269,-30.66479806614716,2.506628277459239],
+        b=[-54.47609879822406,161.5858368580409,-155.6989798598866,66.80131188771972,-13.28068155288572],
+        c=[-0.007784894002430293,-0.3223964580411365,-2.400758277161838,-2.549732539343734,4.374664141464968,2.938163982698783],
+        d=[0.007784695709041462,0.3224671290700398,2.445134137142996,3.754408661907416];
+  let q,r,x;
+  if (p<0.02425){ q=Math.sqrt(-2*Math.log(p)); x=(((((c[0]*q+c[1])*q+c[2])*q+c[3])*q+c[4])*q+c[5])/((((d[0]*q+d[1])*q+d[2])*q+d[3])*q+1); }
+  else if (p>1-0.02425){ q=Math.sqrt(-2*Math.log(1-p)); x=-(((((c[0]*q+c[1])*q+c[2])*q+c[3])*q+c[4])*q+c[5])/((((d[0]*q+d[1])*q+d[2])*q+d[3])*q+1); }
+  else { q=p-0.5; r=q*q; x=(((((a[0]*r+a[1])*r+a[2])*r+a[3])*r+a[4])*r+a[5])*q/(((((b[0]*r+b[1])*r+b[2])*r+b[3])*r+b[4])*r+1); }
+  const e = Phi(x)-p; return x - e*Math.sqrt(2*Math.PI)*Math.exp(x*x/2)/(1+x*e*Math.sqrt(2*Math.PI)*Math.exp(x*x/2)/2);
+}
+function tcdf(t,df){
+  if (t===Infinity) return 1; if (t===-Infinity) return 0;
+  const tail = 0.5*ibeta(df/(df+t*t), df/2, 0.5);
+  return t>0 ? 1-tail : tail;
+}
+function tinv(p,df){
+  let lo=-1e4, hi=1e4;
+  for (let i=0;i<200;i++){ const m=(lo+hi)/2; if (tcdf(m,df)<p) lo=m; else hi=m; }
+  return (lo+hi)/2;
+}
+const fUpper = (F,d1,d2) => F===Infinity?0: F<=0?1: ibeta(d2/(d2+d1*F), d2/2, d1/2);
+const chiUpper = (x,k) => x<=0?1: gammaQ(k/2, x/2);
+function pFrom(cdf, alt){ // cdf = P(T <= observed)
+  if (alt==='greater') return 1-cdf;
+  if (alt==='less') return cdf;
+  return Math.min(1, 2*Math.min(cdf, 1-cdf));
+}
+const pT = (t,df,alt) => pFrom(tcdf(t,df), alt);
+const pZ = (z,alt) => pFrom(Phi(z), alt);
+function ciT(est,se,df,conf,alt){
+  if (alt==='greater') return [est - tinv(conf,df)*se, Infinity];
+  if (alt==='less') return [-Infinity, est + tinv(conf,df)*se];
+  const q = tinv(1-(1-conf)/2, df); return [est-q*se, est+q*se];
+}
+function holm(ps){
+  const m=ps.length, idx=ps.map((p,i)=>i).sort((a,b)=>ps[a]-ps[b]), out=new Array(m); let run=0;
+  idx.forEach((i,r)=>{ run=Math.max(run, Math.min(1,(m-r)*ps[i])); out[i]=run; });
+  return out;
+}
+
+/* ================= Basic statistics ================= */
+const sum = a => a.reduce((s,v)=>s+v,0);
+const mean = a => sum(a)/a.length;
+const variance = a => { const m=mean(a); return a.reduce((s,v)=>s+(v-m)**2,0)/(a.length-1); };
+const sd = a => Math.sqrt(variance(a));
+function quant(s,p){ const h=(s.length-1)*p, lo=Math.floor(h); return s[lo] + (h-lo)*((s[Math.min(lo+1,s.length-1)])-s[lo]); }
+const median = a => quant(a.slice().sort((x,y)=>x-y), 0.5);
+function summary(a){
+  const n=a.length; if (!n) return {n:0};
+  const s=a.slice().sort((x,y)=>x-y), m=mean(a);
+  let m2=0,m3=0,m4=0; for (const x of a){ const d=x-m; m2+=d*d; m3+=d*d*d; m4+=d*d*d*d; }
+  const v = n>1 ? m2/(n-1) : NaN, sdv=Math.sqrt(v), se=sdv/Math.sqrt(n), tq = n>1 ? tinv(0.975,n-1) : NaN;
+  m2/=n; m3/=n; m4/=n;
+  const g1=m3/m2**1.5, g2=m4/(m2*m2)-3;
+  const seSkew = n>2 ? Math.sqrt(6*n*(n-1)/((n-2)*(n+1)*(n+3))) : NaN;
+  return { n, sum:sum(a), mean:m, var:v, sd:sdv, se, ciL:m-tq*se, ciU:m+tq*se, min:s[0], max:s[n-1], range:s[n-1]-s[0],
+    median:quant(s,.5), q1:quant(s,.25), q3:quant(s,.75), iqr:quant(s,.75)-quant(s,.25), g1, g2,
+    skew: n>2 ? Math.sqrt(n*(n-1))/(n-2)*g1 : NaN,
+    kurt: n>3 ? ((n+1)*g2+6)*(n-1)/((n-2)*(n-3)) : NaN,
+    seSkew, seKurt: n>3 ? 2*seSkew*Math.sqrt((n*n-1)/((n-3)*(n+5))) : NaN };
+}
+function rank(a){ // average ranks; returns {r, T} where T = Σ(t³ - t)
+  const idx=a.map((v,i)=>i).sort((i,j)=>a[i]-a[j]), r=new Array(a.length); let T=0;
+  for (let i=0;i<idx.length;){
+    let j=i; while (j+1<idx.length && a[idx[j+1]]===a[idx[i]]) j++;
+    const avg=(i+j)/2+1; for (let k=i;k<=j;k++) r[idx[k]]=avg;
+    const t=j-i+1; if (t>1) T+=t*t*t-t; i=j+1;
+  }
+  return {r,T};
+}
+function pearson(x,y){
+  const mx=mean(x), my=mean(y); let sxy=0,sxx=0,syy=0;
+  for (let i=0;i<x.length;i++){ const a=x[i]-mx, b=y[i]-my; sxy+=a*b; sxx+=a*a; syy+=b*b; }
+  return sxy/Math.sqrt(sxx*syy);
+}
+function anova1(groups){
+  const k=groups.length, all=groups.flat(), N=all.length, gm=mean(all);
+  let ssb=0, ssw=0;
+  for (const g of groups){ const m=mean(g); ssb+=g.length*(m-gm)**2; for (const x of g) ssw+=(x-m)**2; }
+  const dfb=k-1, dfw=N-k, msb=ssb/dfb, msw=ssw/dfw, F=msb/msw;
+  return {ssb,ssw,sst:ssb+ssw,dfb,dfw,msb,msw,F,p:fUpper(F,dfb,dfw),eta2:ssb/(ssb+ssw),omega2:(ssb-dfb*msw)/(ssb+ssw+msw)};
+}
+const levene = groups => anova1(groups.map(g=>{ const md=median(g); return g.map(x=>Math.abs(x-md)); }));
+function welchAnova(groups){
+  const k=groups.length, n=groups.map(g=>g.length), m=groups.map(mean), v=groups.map(variance);
+  const w=n.map((ni,i)=>ni/v[i]), W=sum(w), mw=sum(w.map((wi,i)=>wi*m[i]))/W;
+  const A=sum(w.map((wi,i)=>wi*(m[i]-mw)**2))/(k-1);
+  const lam=sum(w.map((wi,i)=>(1-wi/W)**2/(n[i]-1)));
+  const F=A/(1+2*(k-2)*lam/(k*k-1)), df2=(k*k-1)/(3*lam);
+  return {F, df1:k-1, df2, p:fUpper(F,k-1,df2)};
+}
+function welchT(a,b){
+  const va=variance(a)/a.length, vb=variance(b)/b.length, se=Math.sqrt(va+vb), t=(mean(a)-mean(b))/se;
+  const df=(va+vb)**2/(va*va/(a.length-1)+vb*vb/(b.length-1));
+  return {t,df,se,diff:mean(a)-mean(b)};
+}
+function matInv(M){ // scaled Gauss-Jordan
+  const n=M.length, d=M.map((r,i)=>Math.sqrt(Math.abs(r[i]))||1);
+  const A=M.map((r,i)=>[...r.map((v,j)=>v/(d[i]*d[j])), ...Array.from({length:n},(_,j)=>i===j?1:0)]);
+  for (let c=0;c<n;c++){
+    let piv=c; for (let r=c+1;r<n;r++) if (Math.abs(A[r][c])>Math.abs(A[piv][c])) piv=r;
+    if (Math.abs(A[piv][c])<1e-10) return null;
+    [A[c],A[piv]]=[A[piv],A[c]];
+    const p=A[c][c]; for (let j=0;j<2*n;j++) A[c][j]/=p;
+    for (let r=0;r<n;r++) if (r!==c){ const fct=A[r][c]; if (fct) for (let j=0;j<2*n;j++) A[r][j]-=fct*A[c][j]; }
+  }
+  return A.map((r,i)=>r.slice(n).map((v,j)=>v/(d[i]*d[j])));
+}
+function ols(X,y){
+  const n=X.length, p=X[0].length;
+  const XtX=Array.from({length:p},()=>new Array(p).fill(0)), Xty=new Array(p).fill(0);
+  for (let i=0;i<n;i++){ const r=X[i]; for (let a=0;a<p;a++){ Xty[a]+=r[a]*y[i]; for (let b=0;b<p;b++) XtX[a][b]+=r[a]*r[b]; } }
+  const inv=matInv(XtX); if (!inv) return null;
+  const b=inv.map(row=>row.reduce((s,v,j)=>s+v*Xty[j],0));
+  const fit=X.map(r=>r.reduce((s,v,j)=>s+v*b[j],0)), res=y.map((v,i)=>v-fit[i]);
+  const ym=mean(y), sse=sum(res.map(e=>e*e)), sst=sum(y.map(v=>(v-ym)**2));
+  return {b,inv,fit,res,sse,sst,n,p,r2:1-sse/sst};
+}
+function shapiroWilk(x){ // Royston (1995), AS R94
+  const n=x.length; if (n<3 || n>5000) return null;
+  const s=x.slice().sort((a,b)=>a-b), m0=mean(s), ssq=sum(s.map(v=>(v-m0)**2)); if (!(ssq>0)) return null;
+  const a=new Array(n);
+  if (n===3){ a[0]=-Math.SQRT1_2; a[1]=0; a[2]=Math.SQRT1_2; }
+  else {
+    const m=[]; for (let i=1;i<=n;i++) m.push(normInv((i-0.375)/(n+0.25)));
+    const mm=sum(m.map(v=>v*v)), u=1/Math.sqrt(n), rs=Math.sqrt(mm);
+    const poly=(c,x)=>c.reduce((s,ci,i)=>s+ci*x**i,0);
+    const an=m[n-1]/rs+poly([0,0.221157,-0.147981,-2.07119,4.434685,-2.706056],u);
+    let phi, i1;
+    if (n>5){
+      const an1=m[n-2]/rs+poly([0,0.042981,-0.293762,-1.752461,5.682633,-3.582633],u);
+      phi=(mm-2*m[n-1]**2-2*m[n-2]**2)/(1-2*an*an-2*an1*an1);
+      a[n-1]=an; a[0]=-an; a[n-2]=an1; a[1]=-an1; i1=2;
+    } else { phi=(mm-2*m[n-1]**2)/(1-2*an*an); a[n-1]=an; a[0]=-an; i1=1; }
+    for (let i=i1;i<n-i1;i++) a[i]=m[i]/Math.sqrt(phi);
+  }
+  let num=0; for (let i=0;i<n;i++) num+=a[i]*s[i];
+  const W=Math.min(1,num*num/ssq); let p;
+  if (n===3) p=Math.max(0,Math.min(1,6/Math.PI*(Math.asin(Math.sqrt(W))-Math.asin(Math.sqrt(0.75)))));
+  else if (n<=11){
+    const g=-2.273+0.459*n, mu=0.544-0.39978*n+0.025054*n*n-0.0006714*n**3;
+    const sg=Math.exp(1.3822-0.77857*n+0.062767*n*n-0.0020322*n**3), y=Math.log(1-W);
+    p = y>=g ? 0 : 1-Phi((-Math.log(g-y)-mu)/sg);
+  } else {
+    const L=Math.log(n), mu=-1.5861-0.31082*L-0.083751*L*L+0.0038915*L**3, sg=Math.exp(-0.4803-0.082676*L+0.0030302*L*L);
+    p = 1-Phi((Math.log(1-W)-mu)/sg);
+  }
+  return {W,p};
+}
+function mwuExactDist(n1,n2){ // coefficients of Gaussian binomial [n1+n2 choose n1]_q
+  const L=n1*n2+n1+n2+2, c=new Array(L).fill(0); c[0]=1;
+  for (let i=1;i<=n1;i++){
+    const m=n2+i; for (let k=L-1;k>=m;k--) c[k]-=c[k-m];
+    for (let k=i;k<L;k++) c[k]+=c[k-i];
+  }
+  return c.slice(0,n1*n2+1);
+}
+function signedRankExactDist(n){
+  const M=n*(n+1)/2, c=new Array(M+1).fill(0); c[0]=1;
+  for (let i=1;i<=n;i++) for (let k=M;k>=i;k--) c[k]+=c[k-i];
+  return c;
+}
+function exactP(dist, obs, alt){ // P-values from integer-valued discrete distribution
+  const tot=sum(dist); let le=0, ge=0;
+  dist.forEach((c,k)=>{ if (k<=obs+1e-9) le+=c; if (k>=obs-1e-9) ge+=c; });
+  le/=tot; ge/=tot;
+  return alt==='greater'?ge: alt==='less'?le: Math.min(1,2*Math.min(le,ge));
+}
+
+/* ================= Data model ================= */
+let D = {cols:[], rows:[]};
+const MISS = /^(|na|n\/a|nan|null|\.)$/i;
+const isMiss = v => v==null || MISS.test(String(v).trim());
+const toNum = v => isMiss(v) ? NaN : Number(String(v).trim());
+function colIsNum(j){ let any=false; for (const r of D.rows){ const v=r[j]; if (isMiss(v)) continue; if (!Number.isFinite(Number(String(v).trim()))) return false; any=true; } return any; }
+const numCol = j => D.rows.map(r=>toNum(r[j]));
+const strCol = j => D.rows.map(r=>isMiss(r[j])?null:String(r[j]).trim());
+const finite = j => numCol(j).filter(Number.isFinite);
+const cname = j => esc(D.cols[j]);
+function sortLevels(lv){
+  if (lv.every(v=>Number.isFinite(Number(v)))) return lv.sort((a,b)=>a-b);
+  return lv.sort((a,b)=>a.localeCompare(b,undefined,{numeric:true}));
+}
+function splitBy(j,g){
+  const y=numCol(j), gs=strCol(g), m=new Map();
+  y.forEach((v,i)=>{ if (!Number.isFinite(v) || gs[i]==null) return; if (!m.has(gs[i])) m.set(gs[i],[]); m.get(gs[i]).push(v); });
+  return sortLevels([...m.keys()]).map(k=>[k,m.get(k)]);
+}
+function pairs(j,k){ const x=numCol(j), y=numCol(k), a=[], b=[]; x.forEach((v,i)=>{ if (Number.isFinite(v)&&Number.isFinite(y[i])){a.push(v);b.push(y[i]);} }); return [a,b]; }
+function uniqueName(base, skip=-1){ let n=base||'V', i=2; while (D.cols.some((c,j)=>j!==skip&&c===n)) n=`${base}_${i++}`; return n; }
+
+function parseCSV(text){
+  text=text.replace(/^﻿/,'');
+  const first=text.split(/\r?\n/,1)[0]; let delim=',', best=-1;
+  for (const c of ['\t',',',';','|']){ const n=first.split(c).length; if (n>best){best=n;delim=c;} }
+  const rows=[]; let row=[], field='', q=false;
+  for (let i=0;i<text.length;i++){
+    const ch=text[i];
+    if (q){ if (ch==='"'){ if (text[i+1]==='"'){field+='"';i++;} else q=false; } else field+=ch; }
+    else if (ch==='"' && field==='') q=true;
+    else if (ch===delim){ row.push(field); field=''; }
+    else if (ch==='\n'||ch==='\r'){ if (ch==='\r'&&text[i+1]==='\n') i++; row.push(field); rows.push(row); row=[]; field=''; }
+    else field+=ch;
+  }
+  if (field!==''||row.length){ row.push(field); rows.push(row); }
+  return rows.filter(r=>r.some(c=>c.trim()!==''));
+}
+function loadTable(rows, header=true){
+  if (!rows.length) return;
+  const w=Math.max(...rows.map(r=>r.length));
+  const head=header ? rows.shift() : [];
+  D={cols:[], rows:[]};
+  for (let j=0;j<w;j++) D.cols.push(uniqueName((head[j]||'').trim()||`V${j+1}`));
+  D.rows=rows.map(r=>Array.from({length:w},(_,j)=>(r[j]??'').trim()));
+  dataChanged(true);
+}
+function toCSV(){
+  const q=v=>{ v=String(v??''); return /[",\n\r]/.test(v)?`"${v.replace(/"/g,'""')}"`:v; };
+  return [D.cols, ...D.rows].map(r=>r.map(q).join(',')).join('\n');
+}
+function sampleData(){
+  let s=20240917; const rnd=()=>{ s=(s*1664525+1013904223)%4294967296; return s/4294967296; };
+  const nrm=()=>Math.sqrt(-2*Math.log(rnd()+1e-12))*Math.cos(2*Math.PI*rnd());
+  const rows=[['id','group','sex','age','height_cm','weight_kg','score_pre','score_post','satisfied']];
+  for (let i=1;i<=90;i++){
+    const g='ABC'[(i-1)%3], sex=rnd()<0.5?'F':'M', age=Math.round(22+rnd()*40);
+    const h=(sex==='M'?176:163)+nrm()*7, w=h*0.42-2+nrm()*8+(age-40)*0.12;
+    const pre=60+nrm()*10, post=pre+({A:2,B:6,C:9})[g]+nrm()*6;
+    const sat=rnd()< ({A:.4,B:.55,C:.75})[g] ? 'Yes':'No';
+    rows.push([i,g,sex,age,h.toFixed(1),w.toFixed(1),pre.toFixed(1),i===17?'':post.toFixed(1),sat]);
+  }
+  return rows.map(r=>r.map(String));
+}
+
+/* ================= Data grid UI ================= */
+const MAXROWS=2000;
+let saveTimer;
+function dataChanged(rerender){
+  if (rerender) renderData(); else updateInfo();
+  clearTimeout(saveTimer); saveTimer=setTimeout(()=>store.set('statbench.data', JSON.stringify(D)), 400);
+}
+function updateInfo(){
+  const nn=D.cols.filter((_,j)=>colIsNum(j)).length;
+  $('#dataInfo').textContent = D.cols.length ? `${D.rows.length} rows × ${D.cols.length} columns · ${nn} numeric, ${D.cols.length-nn} text` : '';
+}
+const badge = j => colIsNum(j) ? '<span class="badge n" title="Numeric">123</span>' : '<span class="badge t" title="Text / categorical">abc</span>';
+function renderData(){
+  const wrap=$('#tableWrap');
+  if (!D.cols.length){
+    wrap.innerHTML=`<div class="empty"><h2>No data yet</h2><div>Import a CSV file, paste from a spreadsheet, or start with the sample dataset.</div>
+      <div class="row"><button class="primary" data-act="sample">Load sample data</button><button data-act="import">Import CSV…</button><button data-act="paste">Paste data…</button><button data-act="blank">New blank sheet</button></div></div>`;
+    updateInfo(); return;
+  }
+  let h='<table class="data"><thead><tr><th class="rn">#</th>';
+  D.cols.forEach((c,j)=>{ h+=`<th><div class="colhead"><input class="cn" data-j="${j}" value="${esc(c)}" aria-label="Column name">${badge(j)}<button class="x" data-delcol="${j}" title="Delete column">×</button></div></th>`; });
+  h+='</tr></thead><tbody>';
+  const lim=Math.min(D.rows.length,MAXROWS);
+  for (let i=0;i<lim;i++){
+    h+=`<tr><td class="rn"><button class="x" data-delrow="${i}" title="Delete row">×</button>${i+1}</td>`;
+    const r=D.rows[i]; for (let j=0;j<D.cols.length;j++) h+=`<td><input data-i="${i}" data-j="${j}" value="${esc(r[j])}"></td>`;
+    h+='</tr>';
+  }
+  h+='</tbody></table>';
+  if (D.rows.length>lim) h+=`<div class="note" style="padding:8px 12px">Showing the first ${MAXROWS} of ${D.rows.length} rows for editing. All rows are used in analyses.</div>`;
+  wrap.innerHTML=h; updateInfo();
+}
+$('#tableWrap').addEventListener('change', e=>{
+  const t=e.target;
+  if (t.classList.contains('cn')){ const j=+t.dataset.j; D.cols[j]=uniqueName(t.value.trim()||`V${j+1}`, j); t.value=D.cols[j]; dataChanged(); return; }
+  if (t.dataset.i!=null){
+    const i=+t.dataset.i, j=+t.dataset.j; D.rows[i][j]=t.value.trim();
+    const head=$('#tableWrap thead').querySelectorAll('th')[j+1].querySelector('.badge'); head.outerHTML=badge(j);
+    dataChanged();
+  }
+});
+$('#tableWrap').addEventListener('keydown', e=>{
+  const t=e.target; if (t.dataset.i==null) return;
+  const i=+t.dataset.i, j=+t.dataset.j; let ni=i;
+  if (e.key==='Enter'||e.key==='ArrowDown') ni=i+1; else if (e.key==='ArrowUp') ni=i-1; else return;
+  e.preventDefault();
+  if (ni>=D.rows.length && e.key==='Enter'){ t.dispatchEvent(new Event('change',{bubbles:true})); D.rows.push(D.cols.map(()=>'')); renderData(); }
+  const nx=$(`#tableWrap input[data-i="${ni}"][data-j="${j}"]`); if (nx){ nx.focus(); nx.select(); }
+});
+$('#tableWrap').addEventListener('click', e=>{
+  const t=e.target.closest('button'); if (!t) return;
+  if (t.dataset.delcol!=null){ const j=+t.dataset.delcol; if (!confirm(`Delete column "${D.cols[j]}"?`)) return; D.cols.splice(j,1); D.rows.forEach(r=>r.splice(j,1)); dataChanged(true); }
+  else if (t.dataset.delrow!=null){ D.rows.splice(+t.dataset.delrow,1); dataChanged(true); }
+  else if (t.dataset.act==='sample') loadTable(sampleData());
+  else if (t.dataset.act==='import') $('#file').click();
+  else if (t.dataset.act==='paste') openPaste();
+  else if (t.dataset.act==='blank'){ D={cols:['V1','V2','V3'],rows:Array.from({length:10},()=>['','',''])}; dataChanged(true); }
+});
+$('#bSample').onclick=()=>{ if (!D.cols.length || confirm('Replace current data with the sample dataset?')) loadTable(sampleData()); };
+$('#bImport').onclick=()=>$('#file').click();
+$('#file').onchange=e=>{ const f=e.target.files[0]; if (!f) return; const rd=new FileReader(); rd.onload=()=>loadTable(parseCSV(rd.result)); rd.readAsText(f); e.target.value=''; };
+$('#bAddRow').onclick=()=>{ if (!D.cols.length) D.cols=['V1']; D.rows.push(D.cols.map(()=>'')); dataChanged(true); const w=$('#tableWrap'); w.scrollTop=w.scrollHeight; };
+$('#bAddCol').onclick=()=>{ D.cols.push(uniqueName(`V${D.cols.length+1}`)); D.rows.forEach(r=>r.push('')); dataChanged(true); };
+$('#bExport').onclick=()=>download('data.csv', toCSV(), 'text/csv');
+$('#bClear').onclick=()=>{ if (D.cols.length && confirm('Clear all data?')){ D={cols:[],rows:[]}; dataChanged(true); } };
+$('#bPaste').onclick=()=>openPaste();
+$('#bCompute').onclick=()=>openCompute();
+function download(name, text, type){
+  const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([text],{type})); a.download=name; a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+}
+
+/* ================= Formatting & output helpers ================= */
+function f(x,d=3){
+  if (x==null || Number.isNaN(x)) return '—';
+  if (x===Infinity) return '∞'; if (x===-Infinity) return '−∞';
+  if (Number.isInteger(x) && d===0) return String(x);
+  const ax=Math.abs(x);
+  if (ax>=1e7 || (ax<1e-4 && ax!==0)) return x.toExponential(2);
+  return x.toFixed(d);
+}
+const fp = p => p==null||Number.isNaN(p) ? '—' : p<0.001 ? '< .001' : p.toFixed(3).replace(/^0/,'');
+const pAPA = p => p<0.001 ? '< .001' : '= '+p.toFixed(3).replace(/^0/,'');
+const P = p => ({p, toString(){ return fp(p); }});
+const ci = (c) => `[${f(c[0])}, ${f(c[1])}]`;
+function table(head, rows, cls='res'){
+  const cell = v => (v && typeof v==='object' && 'p' in v) ? `<td class="${v.p<0.05?'sig':''}">${v}</td>` : `<td>${v??''}</td>`;
+  return `<table class="${cls}"><thead><tr>${head.map(h=>`<th>${h}</th>`).join('')}</tr></thead><tbody>${rows.map(r=>`<tr>${r.map(cell).join('')}</tr>`).join('')}</tbody></table>`;
+}
+const h5 = t => `<h5>${t}</h5>`;
+const note = t => `<p class="note">${t}</p>`;
+const report = t => `<div class="report"><b>Report:</b> ${t}</div>`;
+const warn = t => `<div class="warn">${t}</div>`;
+const altText = (alt, a, b) => alt==='greater' ? `${a} > ${b}` : alt==='less' ? `${a} < ${b}` : `${a} ≠ ${b}`;
+function need(cond, msg){ if (!cond) throw new Error(msg); }
+
+/* ================= SVG charts ================= */
+function niceTicks(min,max,count=5){
+  if (!(max>min)){ min-=1; max+=1; }
+  const step0=(max-min)/count, mag=10**Math.floor(Math.log10(step0)), e=step0/mag;
+  const step=(e>=7.5?10:e>=3.5?5:e>=1.5?2:1)*mag;
+  const lo=Math.floor(min/step+1e-9)*step, hi=Math.ceil(max/step-1e-9)*step, ticks=[];
+  for (let v=lo; v<=hi+step*1e-6; v+=step) ticks.push(+v.toPrecision(12));
+  return {lo,hi,ticks};
+}
+const tickFmt = t => Math.abs(t)>=1e5 ? t.toExponential(1) : String(+t.toPrecision(6));
+function makePlot({xmin,xmax,ymin,ymax,xlab='',ylab='',title='',cats=null,w=600,h=360}){
+  const rot = cats && cats.length>6;
+  const m={l:58,r:18,t:title?30:14,b:rot?78:46};
+  const X = cats ? null : niceTicks(xmin,xmax), Y=niceTicks(ymin,ymax);
+  const pw=w-m.l-m.r, ph=h-m.t-m.b;
+  const sx = cats ? i=>m.l+(i+0.5)*pw/cats.length : v=>m.l+(v-X.lo)/(X.hi-X.lo)*pw;
+  const sy = v=>m.t+ph-(v-Y.lo)/(Y.hi-Y.lo)*ph;
+  let g='';
+  if (title) g+=`<text class="ttl" x="${m.l}" y="18">${esc(title)}</text>`;
+  for (const t of Y.ticks) g+=`<line class="grid" x1="${m.l}" x2="${w-m.r}" y1="${sy(t)}" y2="${sy(t)}"/><text x="${m.l-7}" y="${sy(t)+4}" text-anchor="end">${tickFmt(t)}</text>`;
+  if (cats) cats.forEach((c,i)=>{ const lab=esc(String(c).length>14?String(c).slice(0,13)+'…':c);
+      g+= rot ? `<text x="${sx(i)}" y="${h-m.b+14}" text-anchor="end" transform="rotate(-40 ${sx(i)} ${h-m.b+14})">${lab}</text>` : `<text x="${sx(i)}" y="${h-m.b+17}" text-anchor="middle">${lab}</text>`; });
+  else for (const t of X.ticks) g+=`<line class="grid" x1="${sx(t)}" x2="${sx(t)}" y1="${m.t}" y2="${m.t+ph}"/><text x="${sx(t)}" y="${h-m.b+17}" text-anchor="middle">${tickFmt(t)}</text>`;
+  g+=`<line class="axis" x1="${m.l}" x2="${w-m.r}" y1="${m.t+ph}" y2="${m.t+ph}"/><line class="axis" x1="${m.l}" x2="${m.l}" y1="${m.t}" y2="${m.t+ph}"/>`;
+  if (xlab) g+=`<text x="${m.l+pw/2}" y="${h-8}" text-anchor="middle">${esc(xlab)}</text>`;
+  if (ylab) g+=`<text transform="translate(14 ${m.t+ph/2}) rotate(-90)" text-anchor="middle">${esc(ylab)}</text>`;
+  return { sx, sy, X, Y, m, pw, ph, wrap: body => `<svg class="plot" viewBox="0 0 ${w} ${h}" role="img">${g}${body}</svg>` };
+}
+function histSVG(a,{bins,xlab,normal,title}={}){
+  const s=summary(a), k=bins||Math.max(5,Math.ceil(Math.log2(a.length)+1));
+  const lo=s.min, hi=s.max>s.min?s.max:s.min+1, bw=(hi-lo)/k, c=new Array(k).fill(0);
+  for (const x of a){ let i=Math.floor((x-lo)/bw); if (i>=k) i=k-1; c[i]++; }
+  let ymax=Math.max(...c); const scale=a.length*bw;
+  if (normal && s.sd>0) ymax=Math.max(ymax, scale*normPdf(0)/s.sd);
+  const Pl=makePlot({xmin:lo,xmax:hi,ymin:0,ymax,xlab,ylab:'Count',title});
+  let g='';
+  c.forEach((v,i)=>{ const x0=Pl.sx(lo+i*bw), x1=Pl.sx(lo+(i+1)*bw);
+    g+=`<rect class="bar" x="${x0+0.5}" y="${Pl.sy(v)}" width="${Math.max(0,x1-x0-1)}" height="${Pl.sy(0)-Pl.sy(v)}"><title>${f(lo+i*bw)} – ${f(lo+(i+1)*bw)}: ${v}</title></rect>`; });
+  if (normal && s.sd>0){
+    let d=''; for (let i=0;i<=120;i++){ const x=Pl.X.lo+(Pl.X.hi-Pl.X.lo)*i/120; d+=(i?'L':'M')+Pl.sx(x).toFixed(1)+','+Pl.sy(scale*normPdf((x-s.mean)/s.sd)/s.sd).toFixed(1); }
+    g+=`<path class="line" d="${d}"/>`;
+  }
+  return Pl.wrap(g);
+}
+function barSVG(labels, values, {ylab='Count', title}={}){
+  const Pl=makePlot({ymin:0,ymax:Math.max(...values),cats:labels,ylab,title});
+  const bw=Pl.pw/labels.length*0.7; let g='';
+  values.forEach((v,i)=>{ g+=`<rect class="bar" x="${Pl.sx(i)-bw/2}" y="${Pl.sy(v)}" width="${bw}" height="${Pl.sy(0)-Pl.sy(v)}" rx="2"><title>${esc(labels[i])}: ${v}</title></rect>`; });
+  return Pl.wrap(g);
+}
+function boxSVG(groups, {ylab, title}={}){ // groups: [[label, array]]
+  const all=groups.flatMap(g=>g[1]);
+  const Pl=makePlot({ymin:Math.min(...all),ymax:Math.max(...all),cats:groups.map(g=>g[0]),ylab,title});
+  const bw=Math.min(70,Pl.pw/groups.length*0.5); let g='';
+  groups.forEach(([lab,a],i)=>{
+    const s=a.slice().sort((x,y)=>x-y), q1=quant(s,.25), q3=quant(s,.75), md=quant(s,.5), iq=q3-q1;
+    const lo=s.find(v=>v>=q1-1.5*iq), hi=[...s].reverse().find(v=>v<=q3+1.5*iq), x=Pl.sx(i);
+    g+=`<line class="whisk" x1="${x}" x2="${x}" y1="${Pl.sy(lo)}" y2="${Pl.sy(q1)}"/><line class="whisk" x1="${x}" x2="${x}" y1="${Pl.sy(q3)}" y2="${Pl.sy(hi)}"/>`;
+    g+=`<line class="whisk" x1="${x-bw/4}" x2="${x+bw/4}" y1="${Pl.sy(lo)}" y2="${Pl.sy(lo)}"/><line class="whisk" x1="${x-bw/4}" x2="${x+bw/4}" y1="${Pl.sy(hi)}" y2="${Pl.sy(hi)}"/>`;
+    g+=`<rect class="box" x="${x-bw/2}" y="${Pl.sy(q3)}" width="${bw}" height="${Math.max(1,Pl.sy(q1)-Pl.sy(q3))}" rx="2"><title>${esc(lab)}: median ${f(md)}, IQR ${f(q1)}–${f(q3)}, n=${s.length}</title></rect>`;
+    g+=`<line class="med" x1="${x-bw/2}" x2="${x+bw/2}" y1="${Pl.sy(md)}" y2="${Pl.sy(md)}"/>`;
+    const mY=Pl.sy(mean(s)); g+=`<path class="mean" d="M${x},${mY-4}L${x+4},${mY}L${x},${mY+4}L${x-4},${mY}Z"><title>mean ${f(mean(s))}</title></path>`;
+    for (const v of s) if (v<lo||v>hi) g+=`<circle class="out" cx="${x}" cy="${Pl.sy(v)}" r="3.5"><title>${f(v)}</title></circle>`;
+  });
+  return Pl.wrap(g);
+}
+function scatterSVG(x,y,{xlab,ylab,line,ref0,title,refLine}={}){
+  const Pl=makePlot({xmin:Math.min(...x),xmax:Math.max(...x),ymin:Math.min(...y,ref0?0:Infinity),ymax:Math.max(...y,ref0?0:-Infinity),xlab,ylab,title});
+  let g='';
+  if (ref0) g+=`<line class="ref" x1="${Pl.m.l}" x2="${Pl.m.l+Pl.pw}" y1="${Pl.sy(0)}" y2="${Pl.sy(0)}"/>`;
+  x.forEach((v,i)=>{ g+=`<circle class="pt" cx="${Pl.sx(v).toFixed(1)}" cy="${Pl.sy(y[i]).toFixed(1)}" r="3.8"><title>(${f(v)}, ${f(y[i])})</title></circle>`; });
+  const ln = (a,b,cls) => { const x0=Pl.X.lo, x1=Pl.X.hi; const clip=v=>Math.max(Pl.Y.lo,Math.min(Pl.Y.hi,v));
+    // clip line segment to plot box by sampling ends
+    let xa=x0, xb=x1; if (b!==0){ const xs=[(Pl.Y.lo-a)/b,(Pl.Y.hi-a)/b].sort((p,q)=>p-q); xa=Math.max(x0,xs[0]); xb=Math.min(x1,xs[1]); }
+    return xa<xb ? `<line class="${cls}" x1="${Pl.sx(xa)}" x2="${Pl.sx(xb)}" y1="${Pl.sy(clip(a+b*xa))}" y2="${Pl.sy(clip(a+b*xb))}"/>` : ''; };
+  if (refLine) g+=ln(refLine[0],refLine[1],'ref');
+  if (line) g+=ln(line[0],line[1],'line');
+  return Pl.wrap(g);
+}
+function qqSVG(a,{title='Normal Q-Q plot'}={}){
+  const s=a.slice().sort((x,y)=>x-y), n=s.length, th=s.map((_,i)=>normInv((i+1-0.375)/(n+0.25)));
+  const m=mean(s), sdv=sd(s);
+  return scatterSVG(th,s,{xlab:'Theoretical quantiles',ylab:'Sample quantiles',refLine:[m,sdv],title});
+}
+
+/* ================= Analyses ================= */
+const ALT={k:'alt',t:'select',label:'Alternative hypothesis',options:[['two','Two-sided (≠)'],['greater','Greater (>)'],['less','Less (<)']]};
+const CONF={k:'conf',t:'number',label:'Confidence level',def:0.95};
+function grpStats(sp){ return table(['Group','N','Mean','SD','SE','Median'], sp.map(([k,a])=>{ const s=summary(a); return [esc(k),s.n,f(s.mean),f(s.sd),f(s.se),f(s.median)]; })); }
+function twoGroups(o){
+  const sp=splitBy(o.y,o.g);
+  need(sp.length===2, `"${D.cols[o.g]}" has ${sp.length} levels with data; this test needs exactly 2. Use one-way ANOVA / Kruskal–Wallis for more groups.`);
+  need(sp[0][1].length>=2 && sp[1][1].length>=2, 'Each group needs at least 2 observations.');
+  return sp;
+}
+
+const AN = {
+desc:{ g:'Describe', name:'Descriptive statistics',
+  fields:[{k:'vars',t:'nums',label:'Variables'},{k:'g',t:'col',label:'Split by (optional)',optional:true}],
+  run(o){
+    need(o.vars.length,'Select at least one variable.');
+    const cols=[];
+    for (const j of o.vars){
+      if (o.g>=0) for (const [lv,a] of splitBy(j,o.g)) cols.push({h:`${cname(j)}<div class="sub">${cname(o.g)} = ${esc(lv)}</div>`,a,miss:null});
+      else { const all=numCol(j), a=all.filter(Number.isFinite); cols.push({h:cname(j),a,miss:all.length-a.length}); }
+    }
+    const S=cols.map(c=>({...summary(c.a),miss:c.miss}));
+    const R=[['N','n',0],['Missing','miss',0],['Mean','mean'],['95% CI lower','ciL'],['95% CI upper','ciU'],['Std. deviation','sd'],['Variance','var'],['Std. error of mean','se'],
+      ['Median','median'],['Minimum','min'],['Maximum','max'],['Range','range'],['25th percentile','q1'],['75th percentile','q3'],['IQR','iqr'],
+      ['Skewness','skew'],['SE of skewness','seSkew'],['Kurtosis (excess)','kurt'],['SE of kurtosis','seKurt'],['Sum','sum']];
+    return table(['',...cols.map(c=>c.h)], R.map(([lab,k,d])=>[lab,...S.map(s=>s[k]==null?'—':f(s[k],d??3))]));
+  }},
+freq:{ g:'Describe', name:'Frequencies',
+  fields:[{k:'x',t:'col',label:'Variable',prefCat:true},{k:'sort',t:'select',label:'Order',options:[['value','By value'],['count','By frequency']]},{k:'chart',t:'check',label:'Bar chart',def:true}],
+  run(o){
+    const s=strCol(o.x), m=new Map(); let miss=0;
+    s.forEach(v=>v==null?miss++:m.set(v,(m.get(v)||0)+1));
+    let lv=[...m.keys()]; lv = o.sort==='count' ? lv.sort((a,b)=>m.get(b)-m.get(a)) : sortLevels(lv);
+    const N=s.length, V=N-miss; let cum=0;
+    const rows=lv.slice(0,500).map(k=>{ const c=m.get(k); cum+=c; return [esc(k),c,f(100*c/N,1),f(100*c/V,1),f(100*cum/V,1)]; });
+    if (miss) rows.push(['<i>Missing</i>',miss,f(100*miss/N,1),'','']);
+    rows.push(['<b>Total</b>',N,'100.0','','']);
+    let out=table(['Value','Frequency','Percent','Valid %','Cumulative %'],rows);
+    if (lv.length>500) out+=note(`Showing the first 500 of ${lv.length} distinct values.`);
+    out+=note(`${lv.length} distinct values; ${V} valid, ${miss} missing.`);
+    if (o.chart && lv.length<=40) out+=`<div class="plots">${barSVG(lv,lv.map(k=>m.get(k)),{title:D.cols[o.x]})}</div>`;
+    return out;
+  }},
+norm:{ g:'Describe', name:'Normality tests',
+  fields:[{k:'vars',t:'nums',label:'Variables'}],
+  run(o){
+    need(o.vars.length,'Select at least one variable.');
+    let rows=[], plots='';
+    for (const j of o.vars){
+      const a=finite(j), s=summary(a), sw=shapiroWilk(a);
+      const jb=s.n*(s.g1**2+s.g2**2/4)/6;
+      rows.push([cname(j),s.n,sw?f(sw.W,4):'—',sw?P(sw.p):'—',f(jb),P(chiUpper(jb,2)),f(s.skew),f(s.kurt)]);
+      plots+=histSVG(a,{xlab:D.cols[j],normal:true,title:`${D.cols[j]} — histogram`})+qqSVG(a,{title:`${D.cols[j]} — normal Q-Q`});
+    }
+    return table(['Variable','N','Shapiro–Wilk W','p','Jarque–Bera','p','Skewness','Kurtosis'],rows)
+      + note('H₀: the data come from a normal distribution. A small p (e.g. < .05) indicates departure from normality. Shapiro–Wilk uses Royston’s (1995) approximation (3 ≤ n ≤ 5000).')
+      + `<div class="plots">${plots}</div>`;
+  }},
+hist:{ g:'Graphs', name:'Histogram',
+  fields:[{k:'x',t:'num',label:'Variable'},{k:'bins',t:'number',label:'Number of bins',ph:'auto (Sturges)'},{k:'normal',t:'check',label:'Overlay normal curve',def:true}],
+  run(o){ const a=finite(o.x); need(a.length>=2,'Need at least 2 values.'); return `<div class="plots">${histSVG(a,{bins:o.bins>0?Math.round(o.bins):null,xlab:D.cols[o.x],normal:o.normal})}</div>`; }},
+box:{ g:'Graphs', name:'Box plot',
+  fields:[{k:'vars',t:'nums',label:'Variables'},{k:'g',t:'col',label:'Group by (optional)',optional:true}],
+  run(o){
+    need(o.vars.length,'Select at least one variable.');
+    let out='';
+    if (o.g>=0) for (const j of o.vars) out+=boxSVG(splitBy(j,o.g),{ylab:D.cols[j],title:`${D.cols[j]} by ${D.cols[o.g]}`});
+    else out=boxSVG(o.vars.map(j=>[D.cols[j],finite(j)]).filter(g=>g[1].length),{});
+    return `<div class="plots">${out}</div>`+note('Box = IQR, line = median, ◆ = mean, whiskers = 1.5 × IQR, circles = outliers.');
+  }},
+scatter:{ g:'Graphs', name:'Scatter plot',
+  fields:[{k:'x',t:'num',label:'X variable'},{k:'y',t:'num',label:'Y variable',nth:1},{k:'fit',t:'check',label:'Add regression line',def:true}],
+  run(o){
+    const [x,y]=pairs(o.x,o.y); need(x.length>=3,'Need at least 3 complete pairs.');
+    const r=pearson(x,y), b=r*sd(y)/sd(x), a=mean(y)-b*mean(x);
+    return `<div class="plots">${scatterSVG(x,y,{xlab:D.cols[o.x],ylab:D.cols[o.y],line:o.fit?[a,b]:null})}</div>`
+      + note(`n = ${x.length}, r = ${f(r)}, R² = ${f(r*r)}${o.fit?`; fitted line: ŷ = ${f(a)} ${b<0?'−':'+'} ${f(Math.abs(b))}·x`:''}`);
+  }},
+t1:{ g:'Compare means', name:'One-sample t-test',
+  fields:[{k:'x',t:'num',label:'Variable'},{k:'mu',t:'number',label:'Test value (μ₀)',def:0},ALT,CONF],
+  run(o){
+    const a=finite(o.x); need(a.length>=2,'Need at least 2 values.');
+    const mu=o.mu??0, conf=o.conf||0.95, s=summary(a), df=s.n-1, t=(s.mean-mu)/s.se, p=pT(t,df,o.alt), c=ciT(s.mean-mu,s.se,df,conf,o.alt), d=(s.mean-mu)/s.sd;
+    return table(['Variable','N','Mean','SD','SE'],[[cname(o.x),s.n,f(s.mean),f(s.sd),f(s.se)]])
+      + table(['t','df','p','Mean difference',`${Math.round(conf*100)}% CI of difference`,"Cohen's d"],[[f(t),df,P(p),f(s.mean-mu),ci(c),f(d)]])
+      + note(`H₁: μ ${altText(o.alt,'','').trim()} ${mu}`)
+      + report(`t(${df}) = ${f(t,2)}, p ${pAPA(p)}, d = ${f(d,2)}`);
+  }},
+t2:{ g:'Compare means', name:'Independent-samples t-test',
+  fields:[{k:'y',t:'num',label:'Dependent variable'},{k:'g',t:'col',label:'Grouping variable (2 levels)',prefCat:true},ALT,CONF],
+  run(o){
+    const sp=twoGroups(o), [[l1,a],[l2,b]]=sp, conf=o.conf||0.95, na=a.length, nb=b.length;
+    const diff=mean(a)-mean(b), df1=na+nb-2, sp2=((na-1)*variance(a)+(nb-1)*variance(b))/df1, se1=Math.sqrt(sp2*(1/na+1/nb)), t1=diff/se1;
+    const w=welchT(a,b), p1=pT(t1,df1,o.alt), p2=pT(w.t,w.df,o.alt);
+    const d=diff/Math.sqrt(sp2), gH=d*(1-3/(4*df1-1)), lv=levene([a,b]), cl=`${Math.round(conf*100)}% CI`;
+    return h5('Group statistics')+grpStats(sp)
+      + h5('Test')+table(['Test','t','df','p','Mean diff.','SE diff.',cl],[
+          ["Student's t (equal variances)",f(t1),df1,P(p1),f(diff),f(se1),ci(ciT(diff,se1,df1,conf,o.alt))],
+          ["Welch's t (unequal variances)",f(w.t),f(w.df,2),P(p2),f(diff),f(w.se),ci(ciT(diff,w.se,w.df,conf,o.alt))]])
+      + h5('Effect size & assumptions')+table(['Statistic','Value'],[["Cohen's d",f(d)],["Hedges' g",f(gH)],[`Levene's test (median) F(${lv.dfb}, ${lv.dfw})`,f(lv.F)],['Levene p',P(lv.p)]])
+      + note(`Difference = ${esc(l1)} − ${esc(l2)}. H₁: μ(${esc(l1)}) ${altText(o.alt,'','').trim()} μ(${esc(l2)}). Welch's test is recommended unless variances are known to be equal.`)
+      + `<div class="plots">${boxSVG(sp,{ylab:D.cols[o.y]})}</div>`
+      + report(`Welch t(${f(w.df,2)}) = ${f(w.t,2)}, p ${pAPA(p2)}, d = ${f(d,2)}`);
+  }},
+tp:{ g:'Compare means', name:'Paired-samples t-test',
+  fields:[{k:'x',t:'num',label:'Variable 1'},{k:'y',t:'num',label:'Variable 2',nth:1},ALT,CONF],
+  run(o){
+    const [x,y]=pairs(o.x,o.y); need(x.length>=2,'Need at least 2 complete pairs.');
+    const dd=x.map((v,i)=>v-y[i]), s=summary(dd), conf=o.conf||0.95, df=s.n-1, t=s.mean/s.se, p=pT(t,df,o.alt), dz=s.mean/s.sd, r=pearson(x,y);
+    return table(['Variable','N','Mean','SD','SE'],[[cname(o.x),x.length,f(mean(x)),f(sd(x)),f(sd(x)/Math.sqrt(x.length))],[cname(o.y),y.length,f(mean(y)),f(sd(y)),f(sd(y)/Math.sqrt(y.length))]])
+      + table(['Mean diff.','SD diff.','SE','t','df','p',`${Math.round(conf*100)}% CI`,"Cohen's d<sub>z</sub>",'r (pairs)'],[[f(s.mean),f(s.sd),f(s.se),f(t),df,P(p),ci(ciT(s.mean,s.se,df,conf,o.alt)),f(dz),f(r)]])
+      + note(`Difference = ${cname(o.x)} − ${cname(o.y)}; ${D.rows.length-x.length} incomplete pairs excluded.`)
+      + report(`t(${df}) = ${f(t,2)}, p ${pAPA(p)}, d<sub>z</sub> = ${f(dz,2)}`);
+  }},
+anova:{ g:'Compare means', name:'One-way ANOVA',
+  fields:[{k:'y',t:'num',label:'Dependent variable'},{k:'g',t:'col',label:'Factor (grouping variable)',prefCat:true},{k:'post',t:'check',label:'Post hoc pairwise comparisons (Welch t, Holm-adjusted)',def:true}],
+  run(o){
+    const sp=splitBy(o.y,o.g); need(sp.length>=2,'Need at least 2 groups.'); need(sp.every(g=>g[1].length>=2),'Each group needs at least 2 observations.');
+    const G=sp.map(g=>g[1]), A=anova1(G), lv=levene(G), wa=welchAnova(G);
+    let out=h5('Group statistics')+grpStats(sp)
+      + h5('ANOVA')+table(['Source','Sum of squares','df','Mean square','F','p'],[
+        ['Between groups',f(A.ssb),A.dfb,f(A.msb),f(A.F),P(A.p)],['Within groups',f(A.ssw),A.dfw,f(A.msw),'',''],['Total',f(A.sst),A.dfb+A.dfw,'','','']])
+      + table(['Statistic','Value'],[['η² (eta squared)',f(A.eta2)],['ω² (omega squared)',f(A.omega2)],[`Welch's ANOVA F(${wa.df1}, ${f(wa.df2,2)})`,f(wa.F)],["Welch's p",P(wa.p)],[`Levene's test F(${lv.dfb}, ${lv.dfw})`,f(lv.F)],['Levene p',P(lv.p)]]);
+    if (o.post && sp.length>2){
+      const rows=[], ps=[];
+      for (let i=0;i<sp.length;i++) for (let j=i+1;j<sp.length;j++){ const w=welchT(G[i],G[j]); const p=pT(w.t,w.df,'two'); ps.push(p); rows.push([`${esc(sp[i][0])} − ${esc(sp[j][0])}`,f(w.diff),f(w.se),f(w.t),f(w.df,2),fp(p)]); }
+      holm(ps).forEach((p,i)=>rows[i].push(P(p)));
+      out+=h5('Post hoc comparisons')+table(['Comparison','Mean diff.','SE','t','df','p (raw)','p (Holm)'],rows);
+    }
+    if (lv.p<0.05) out+=warn("Levene's test suggests unequal variances — prefer Welch's ANOVA.");
+    return out+`<div class="plots">${boxSVG(sp,{ylab:D.cols[o.y]})}</div>`+report(`F(${A.dfb}, ${A.dfw}) = ${f(A.F,2)}, p ${pAPA(A.p)}, η² = ${f(A.eta2,2)}`);
+  }},
+mwu:{ g:'Nonparametric', name:'Mann–Whitney U test',
+  fields:[{k:'y',t:'num',label:'Dependent variable'},{k:'g',t:'col',label:'Grouping variable (2 levels)',prefCat:true},ALT],
+  run(o){
+    const sp=twoGroups(o), [[l1,a],[l2,b]]=sp, n1=a.length, n2=b.length, N=n1+n2;
+    const {r,T}=rank([...a,...b]), R1=sum(r.slice(0,n1)), R2=sum(r.slice(n1));
+    const U1=R1-n1*(n1+1)/2, mu=n1*n2/2, sg=Math.sqrt(n1*n2/12*((N+1)-T/(N*(N-1))));
+    const cc = o.alt==='two' ? Math.sign(U1-mu)*0.5 : o.alt==='greater' ? 0.5 : -0.5;
+    const z=(U1-mu-cc)/sg, pa=pZ(z,o.alt), rEff=(U1-mu)/sg/Math.sqrt(N);
+    const exact = T===0 && N<=60, pe = exact ? exactP(mwuExactDist(n1,n2),U1,o.alt) : null, p = exact?pe:pa;
+    return table(['Group','N','Median','Mean rank','Sum of ranks'],[[esc(l1),n1,f(median(a)),f(R1/n1,2),f(R1,1)],[esc(l2),n2,f(median(b)),f(R2/n2,2),f(R2,1)]])
+      + table(['U','W','z','p (asymptotic)','p (exact)','r (effect size)','Rank-biserial'],[[f(U1,1),f(R1,1),f(z),P(pa),exact?P(pe):'—',f(rEff),f(2*U1/(n1*n2)-1)]])
+      + note(`U is for ${esc(l1)} (number of pairs where ${esc(l1)} > ${esc(l2)}). Asymptotic p uses tie and continuity corrections; exact p is computed when there are no ties and N ≤ 60. H₁: ${esc(l1)} ${altText(o.alt,'','').trim()} ${esc(l2)} (stochastically).`)
+      + report(`U = ${f(U1,1)}, ${exact?'exact ':''}p ${pAPA(p)}, r = ${f(rEff,2)}`);
+  }},
+wsr:{ g:'Nonparametric', name:'Wilcoxon signed-rank test',
+  fields:[{k:'x',t:'num',label:'Variable 1'},{k:'y',t:'num',label:'Variable 2',nth:1},ALT],
+  run(o){
+    const [x,y]=pairs(o.x,o.y), d=x.map((v,i)=>v-y[i]).filter(v=>v!==0), n=d.length; need(n>=2,'Need at least 2 non-zero differences.');
+    const {r,T}=rank(d.map(Math.abs)); let Wp=0; d.forEach((v,i)=>{ if (v>0) Wp+=r[i]; });
+    const Wm=n*(n+1)/2-Wp, mu=n*(n+1)/4, sg=Math.sqrt(n*(n+1)*(2*n+1)/24-T/48);
+    const cc = o.alt==='two' ? Math.sign(Wp-mu)*0.5 : o.alt==='greater' ? 0.5 : -0.5;
+    const z=(Wp-mu-cc)/sg, pa=pZ(z,o.alt), exact=T===0&&n<=50, pe=exact?exactP(signedRankExactDist(n),Wp,o.alt):null, rEff=(Wp-mu)/sg/Math.sqrt(n);
+    return table(['','N','Median'],[[cname(o.x),x.length,f(median(x))],[cname(o.y),y.length,f(median(y))]])
+      + table(['W+','W−','z','p (asymptotic)','p (exact)','r (effect size)'],[[f(Wp,1),f(Wm,1),f(z),P(pa),exact?P(pe):'—',f(rEff)]])
+      + note(`Differences = ${cname(o.x)} − ${cname(o.y)}; ${x.length-n} zero differences dropped, n = ${n}. Exact p computed when there are no ties and n ≤ 50.`)
+      + report(`W = ${f(Wp,1)}, ${exact?'exact ':''}p ${pAPA(exact?pe:pa)}, r = ${f(rEff,2)}`);
+  }},
+kw:{ g:'Nonparametric', name:'Kruskal–Wallis test',
+  fields:[{k:'y',t:'num',label:'Dependent variable'},{k:'g',t:'col',label:'Grouping variable',prefCat:true},{k:'post',t:'check',label:"Dunn's post hoc test (Holm-adjusted)",def:true}],
+  run(o){
+    const sp=splitBy(o.y,o.g); need(sp.length>=2,'Need at least 2 groups.');
+    const all=sp.flatMap(g=>g[1]), N=all.length, {r,T}=rank(all); let off=0;
+    const R=sp.map(([,a])=>{ const s=sum(r.slice(off,off+a.length)); off+=a.length; return s; });
+    let H=12/(N*(N+1))*sum(R.map((s,i)=>s*s/sp[i][1].length))-3*(N+1); H/=1-T/(N**3-N);
+    const df=sp.length-1, p=chiUpper(H,df);
+    let out=table(['Group','N','Median','Mean rank'],sp.map(([k,a],i)=>[esc(k),a.length,f(median(a)),f(R[i]/a.length,2)]))
+      + table(['H','df','p','ε² (epsilon squared)'],[[f(H),df,P(p),f(H/(N-1))]]);
+    if (o.post && sp.length>2){
+      const rows=[], ps=[], base=N*(N+1)/12-T/(12*(N-1));
+      for (let i=0;i<sp.length;i++) for (let j=i+1;j<sp.length;j++){
+        const ni=sp[i][1].length, nj=sp[j][1].length, z=(R[i]/ni-R[j]/nj)/Math.sqrt(base*(1/ni+1/nj)), pp=pZ(z,'two');
+        ps.push(pp); rows.push([`${esc(sp[i][0])} − ${esc(sp[j][0])}`,f(z),fp(pp)]);
+      }
+      holm(ps).forEach((pp,i)=>rows[i].push(P(pp)));
+      out+=h5("Dunn's pairwise comparisons")+table(['Comparison','z','p (raw)','p (Holm)'],rows);
+    }
+    return out+`<div class="plots">${boxSVG(sp,{ylab:D.cols[o.y]})}</div>`+report(`H(${df}) = ${f(H,2)}, p ${pAPA(p)}`);
+  }},
+corr:{ g:'Relationships', name:'Correlation matrix',
+  fields:[{k:'vars',t:'nums',label:'Variables (2 or more)'},{k:'method',t:'select',label:'Method',options:[['pearson','Pearson r'],['spearman','Spearman ρ']]}],
+  run(o){
+    need(o.vars.length>=2,'Select at least 2 variables.');
+    const V=o.vars, k=V.length, cells=[];
+    for (let i=0;i<k;i++){ const row=[`<b>${cname(V[i])}</b>`];
+      for (let j=0;j<k;j++){
+        if (j>=i){ row.push(j===i?'<span class="note">—</span>':''); continue; }
+        let [x,y]=pairs(V[i],V[j]); const n=x.length;
+        if (n<3){ row.push('<small>n &lt; 3</small>'); continue; }
+        if (o.method==='spearman'){ x=rank(x).r; y=rank(y).r; }
+        const rr=pearson(x,y), t=rr*Math.sqrt((n-2)/(1-rr*rr)), p=Math.abs(rr)>=1?0:pT(t,n-2,'two');
+        const bg = Number.isFinite(rr) ? (rr>0?`rgba(59,130,246,${(Math.abs(rr)*0.5).toFixed(2)})`:`rgba(239,68,68,${(Math.abs(rr)*0.5).toFixed(2)})`) : 'transparent';
+        const star = p<0.001?'***':p<0.01?'**':p<0.05?'*':'';
+        row.push(`<div style="background:${bg};padding:4px 6px;border-radius:4px"><b>${f(rr)}${star}</b><small>p ${fp(p)}</small><small>n = ${n}</small></div>`);
+      }
+      cells.push(row);
+    }
+    return table(['',...V.map(cname)],cells,'res corr')+note(`${o.method==='spearman'?'Spearman rank':'Pearson'} correlations, pairwise deletion. * p < .05, ** p < .01, *** p < .001 (two-sided).`);
+  }},
+reg:{ g:'Relationships', name:'Linear regression',
+  fields:[{k:'y',t:'num',label:'Dependent variable'},{k:'xs',t:'cols',label:'Predictors (text columns are dummy-coded)'},{k:'plots',t:'check',label:'Residual diagnostics plots',def:true}],
+  run(o){
+    const xs=o.xs.filter(j=>j!==o.y); need(xs.length,'Select at least one predictor (other than the dependent variable).');
+    const isN=xs.map(colIsNum), Y=numCol(o.y), Sx=xs.map((j,k)=>isN[k]?numCol(j):strCol(j));
+    const keep=D.rows.map((_,i)=>Number.isFinite(Y[i]) && xs.every((j,k)=>isN[k]?Number.isFinite(Sx[k][i]):Sx[k][i]!=null));
+    const idx=keep.flatMap((v,i)=>v?[i]:[]);
+    const terms=['(Intercept)'], cols=[];
+    xs.forEach((j,k)=>{
+      if (isN[k]){ terms.push(cname(j)); cols.push(idx.map(i=>Sx[k][i])); }
+      else { const lv=sortLevels([...new Set(idx.map(i=>Sx[k][i]))]); for (const L of lv.slice(1)){ terms.push(`${cname(j)} [${esc(L)}]`); cols.push(idx.map(i=>Sx[k][i]===L?1:0)); } }
+    });
+    const n=idx.length, p=terms.length; need(n>p,`Not enough complete cases (${n}) for ${p} parameters.`);
+    const y=idx.map(i=>Y[i]), X=idx.map((_,r)=>[1,...cols.map(c=>c[r])]), M=ols(X,y);
+    need(M,'The predictors are perfectly collinear (singular design matrix). Remove redundant predictors.');
+    const dfe=n-p, dfr=p-1, mse=M.sse/dfe, ssr=M.sst-M.sse, F=(ssr/dfr)/mse, pF=fUpper(F,dfr,dfe), adj=1-(1-M.r2)*(n-1)/dfe, tq=tinv(0.975,dfe), sy=sd(y);
+    const vif = cols.map((c,k)=>{ if (cols.length<2) return NaN; const others=cols.filter((_,q)=>q!==k); const m=ols(c.map((_,r)=>[1,...others.map(q=>q[r])]),c); return m?1/(1-m.r2):Infinity; });
+    const coef=M.b.map((b,k)=>{ const se=Math.sqrt(M.inv[k][k]*mse), t=b/se, pp=pT(t,dfe,'two');
+      return [terms[k],f(b),f(se),k?f(b*sd(cols[k-1])/sy):'',f(t),P(pp),ci([b-tq*se,b+tq*se]),k?f(vif[k-1],2):'']; });
+    let dw=0; for (let i=1;i<n;i++) dw+=(M.res[i]-M.res[i-1])**2; dw/=M.sse;
+    const eq='ŷ = '+M.b.map((b,k)=>k?`${b<0?'−':'+'} ${f(Math.abs(b))}·${terms[k]}`:f(b)).join(' ');
+    let out=h5('Model summary')+table(['N','R','R²','Adjusted R²','Std. error of estimate','Durbin–Watson'],[[n,f(Math.sqrt(M.r2)),f(M.r2),f(adj),f(Math.sqrt(mse)),f(dw)]])
+      + h5('ANOVA')+table(['Source','Sum of squares','df','Mean square','F','p'],[['Regression',f(ssr),dfr,f(ssr/dfr),f(F),P(pF)],['Residual',f(M.sse),dfe,f(mse),'',''],['Total',f(M.sst),n-1,'','','']])
+      + h5('Coefficients')+table(['Term','B','SE','β (std.)','t','p','95% CI','VIF'],coef)
+      + note(`${esc(D.cols[o.y])}: ${eq}`) + note(`${D.rows.length-n} rows excluded for missing values (listwise).`);
+    if (vif.some(v=>v>10)) out+=warn('Some VIF values exceed 10 — strong multicollinearity.');
+    if (o.plots) out+=`<div class="plots">${scatterSVG(M.fit,M.res,{xlab:'Fitted values',ylab:'Residuals',ref0:true,title:'Residuals vs fitted'})}${qqSVG(M.res,{title:'Normal Q-Q of residuals'})}</div>`;
+    return out+report(`R² = ${f(M.r2,2)}, F(${dfr}, ${dfe}) = ${f(F,2)}, p ${pAPA(pF)}`);
+  }},
+chisq:{ g:'Categorical', name:'Chi-square test (crosstab)',
+  fields:[{k:'r',t:'col',label:'Row variable',prefCat:true},{k:'c',t:'col',label:'Column variable',prefCat:true,nth:1},{k:'pct',t:'select',label:'Percentages',options:[['none','None'],['row','Row %'],['col','Column %'],['total','Total %']]}],
+  run(o){
+    need(o.r!==o.c,'Choose two different variables.');
+    const a=strCol(o.r), b=strCol(o.c), ok=a.map((v,i)=>v!=null&&b[i]!=null);
+    const R=sortLevels([...new Set(a.filter((v,i)=>ok[i]))]), C=sortLevels([...new Set(b.filter((v,i)=>ok[i]))]);
+    need(R.length>=2&&C.length>=2,'Each variable needs at least 2 categories.');
+    need(R.length*C.length<=400,'Too many categories for a crosstab (max 400 cells).');
+    const O=R.map(()=>C.map(()=>0)); a.forEach((v,i)=>{ if (ok[i]) O[R.indexOf(v)][C.indexOf(b[i])]++; });
+    const rt=O.map(sum), ct=C.map((_,j)=>sum(O.map(r=>r[j]))), N=sum(rt);
+    const E=O.map((r,i)=>r.map((_,j)=>rt[i]*ct[j]/N));
+    let x2=0,g2=0,low=0; O.forEach((r,i)=>r.forEach((v,j)=>{ const e=E[i][j]; x2+=(v-e)**2/e; if (v>0) g2+=2*v*Math.log(v/e); if (e<5) low++; }));
+    const df=(R.length-1)*(C.length-1), V=Math.sqrt(x2/(N*(Math.min(R.length,C.length)-1)));
+    const pc=(v,i,j)=>o.pct==='row'?v/rt[i]:o.pct==='col'?v/ct[j]:v/N;
+    const rows=O.map((r,i)=>[`<b>${esc(R[i])}</b>`,...r.map((v,j)=>`${v}<div class="sub">exp ${f(E[i][j],1)}${o.pct!=='none'?` · ${f(100*pc(v,i,j),1)}%`:''}</div>`),`<b>${rt[i]}</b>`]);
+    rows.push(['<b>Total</b>',...ct.map(v=>`<b>${v}</b>`),`<b>${N}</b>`]);
+    const tests=[['Pearson χ²',f(x2),df,P(chiUpper(x2,df))],['Likelihood ratio G²',f(g2),df,P(chiUpper(g2,df))]];
+    if (R.length===2&&C.length===2){
+      const [[A,B],[Cc,Dd]]=O; let y=0; O.forEach((r,i)=>r.forEach((v,j)=>{ y+=Math.max(0,Math.abs(v-E[i][j])-0.5)**2/E[i][j]; }));
+      tests.push(['Yates continuity-corrected χ²',f(y),1,P(chiUpper(y,1))]);
+      const r1=A+B, c1=A+Cc, lp=k=>lchoose(r1,k)+lchoose(N-r1,c1-k)-lchoose(N,c1), obs=lp(A); let pf=0;
+      for (let k=Math.max(0,c1-(N-r1)); k<=Math.min(r1,c1); k++){ const l=lp(k); if (l<=obs+1e-7) pf+=Math.exp(l); }
+      tests.push(["Fisher's exact test (two-sided)",'','',P(Math.min(1,pf))]);
+      tests.push(['Odds ratio',f(A*Dd/(B*Cc)),'','']);
+    }
+    let out=table([`${cname(o.r)} \\ ${cname(o.c)}`,...C.map(esc),'Total'],rows)
+      + table(['Test','Value','df','p'],tests) + table(["Cramér's V",'N'],[[f(V),N]]);
+    if (low/(R.length*C.length)>0.2) out+=warn(`${low} of ${R.length*C.length} cells have expected counts below 5 — the χ² approximation may be unreliable${R.length===2&&C.length===2?"; use Fisher's exact test":''}.`);
+    return out+report(`χ²(${df}, N = ${N}) = ${f(x2,2)}, p ${pAPA(chiUpper(x2,df))}, V = ${f(V,2)}`);
+  }},
+};
+
+/* ================= Dialogs ================= */
+const dlg=$('#dlg');
+let dlgHandler=null;
+function openDialog(title, bodyHTML, okLabel, onOk){
+  $('#dlgTitle').textContent=title; $('#dlgBody').innerHTML=bodyHTML; $('#dlgErr').textContent=''; $('#dlgOk').textContent=okLabel;
+  dlgHandler=onOk; dlg.showModal();
+  const first=$('#dlgBody').querySelector('select,input,textarea'); if (first) first.focus();
+}
+$('#dlgForm').addEventListener('submit', e=>{
+  if (e.submitter && e.submitter.value==='cancel') return;
+  e.preventDefault();
+  try { dlgHandler(); dlg.close(); }
+  catch(err){ $('#dlgErr').textContent=err.message; console.error(err); }
+});
+function fieldHTML(fd){
+  const all=D.cols.map((c,j)=>[j,c]), nums=all.filter(([j])=>colIsNum(j));
+  const opts=(list,sel)=>list.map(([j,c])=>`<option value="${j}"${j===sel?' selected':''}>${esc(c)}</option>`).join('');
+  const pick=(list)=>{ let l=list; if (fd.prefCat){ const cats=list.filter(([j])=>!colIsNum(j)); if (cats.length) l=[...cats,...list.filter(([j])=>colIsNum(j))]; } return (l[fd.nth||0]||l[0]||[-1])[0]; };
+  switch (fd.t){
+    case 'num': return `<label class="f">${fd.label}<select name="${fd.k}">${opts(nums,pick(nums))}</select></label>`;
+    case 'col': return `<label class="f">${fd.label}<select name="${fd.k}">${fd.optional?'<option value="-1">— none —</option>':''}${opts(all,fd.optional?-2:pick(all))}</select></label>`;
+    case 'nums': case 'cols': { const list=fd.t==='nums'?nums:all;
+      return `<fieldset><legend>${fd.label}</legend><div class="checks">${list.map(([j,c])=>`<label class="ck"><input type="checkbox" name="${fd.k}" value="${j}">${esc(c)}${fd.t==='cols'&&!colIsNum(j)?' <span class="badge t">abc</span>':''}</label>`).join('')||'<span class="hint">No suitable columns.</span>'}</div></fieldset>`; }
+    case 'number': return `<label class="f">${fd.label}<input type="number" step="any" name="${fd.k}" value="${fd.def??''}" placeholder="${fd.ph||''}"></label>`;
+    case 'select': return `<label class="f">${fd.label}<select name="${fd.k}">${fd.options.map(([v,l])=>`<option value="${v}">${l}</option>`).join('')}</select></label>`;
+    case 'check': return `<label class="ck"><input type="checkbox" name="${fd.k}"${fd.def?' checked':''}>${fd.label}</label>`;
+  }
+}
+function readForm(fields){
+  const F=$('#dlgForm'), o={};
+  for (const fd of fields){
+    if (fd.t==='nums'||fd.t==='cols') o[fd.k]=[...F.querySelectorAll(`input[name="${fd.k}"]:checked`)].map(e=>+e.value);
+    else if (fd.t==='check') o[fd.k]=F.elements[fd.k].checked;
+    else if (fd.t==='number'){ const v=F.elements[fd.k].value; o[fd.k]=v===''?null:+v; }
+    else if (fd.t==='num'||fd.t==='col'){ o[fd.k]=+F.elements[fd.k].value; need(fd.optional||o[fd.k]>=0,`Choose a ${fd.label.toLowerCase()}.`); }
+    else o[fd.k]=F.elements[fd.k].value;
+  }
+  return o;
+}
+function openAnalysis(key){
+  const A=AN[key];
+  if (!D.cols.length){ alert('Load or enter some data first (Data tab).'); return; }
+  if (A.fields.some(fd=>fd.t==='num'||fd.t==='nums') && !D.cols.some((_,j)=>colIsNum(j))){ alert('This analysis needs at least one numeric column.'); return; }
+  openDialog(A.name, A.fields.map(fieldHTML).join(''), 'Run', ()=>{
+    const o=readForm(A.fields);
+    if (o.conf!=null) need(o.conf>0&&o.conf<1,'Confidence level must be between 0 and 1 (e.g. 0.95).');
+    addResult(A.name, A.run(o));
+  });
+}
+function openPaste(){
+  openDialog('Paste data', `<span class="hint">Paste from Excel, Google Sheets or a CSV/TSV file. The delimiter is detected automatically.</span>
+    <textarea class="paste" name="txt" placeholder="name,age,score&#10;Ann,34,81&#10;Bo,29,77"></textarea>
+    <label class="ck"><input type="checkbox" name="hdr" checked>First row contains column names</label>`, 'Load', ()=>{
+    const F=$('#dlgForm'), rows=parseCSV(F.elements.txt.value); need(rows.length,'Nothing to load.');
+    loadTable(rows, F.elements.hdr.checked);
+  });
+}
+function openCompute(){
+  need2();
+  const ids=D.cols.map(c=>c.replace(/\W+/g,'_').replace(/^(\d)/,'_$1'));
+  openDialog('Compute new column', `<label class="f">New column name<input name="nm" value="${uniqueName('computed')}"></label>
+    <label class="f">Expression<input name="ex" placeholder="e.g. weight_kg / (height_cm/100)**2" autocomplete="off"></label>
+    <span class="hint">Evaluated for each row. Variables: ${ids.map(i=>`<code>${esc(i)}</code>`).join(', ')}. Functions: log, log10, exp, sqrt, abs, round, floor, ceil, min, max, pow, sin, cos… Use <code>cond ? a : b</code> for conditions. Missing values give empty cells.</span>`, 'Compute', ()=>{
+    const F=$('#dlgForm'), ex=F.elements.ex.value.trim(); need(ex,'Enter an expression.');
+    let fn; try { fn=new Function('M','v',`with(M){ const [${ids.join(',')}]=v; return (${ex}); }`); } catch(e){ throw new Error('Syntax error: '+e.message); }
+    const nums=D.cols.map((_,j)=>colIsNum(j)), M=Object.create(null);
+    for (const k of Object.getOwnPropertyNames(Math)) M[k]=Math[k];
+    M.ln=Math.log;
+    const out=D.rows.map(r=>{
+      const v=r.map((x,j)=>nums[j]?toNum(x):(isMiss(x)?null:x));
+      let res; try { res=fn(M,v); } catch(e){ throw new Error('Error evaluating expression: '+e.message); }
+      if (res==null || (typeof res==='number' && !Number.isFinite(res))) return '';
+      if (typeof res==='boolean') return res?'1':'0';
+      return typeof res==='number' ? String(+res.toPrecision(12)) : String(res);
+    });
+    D.cols.push(uniqueName(F.elements.nm.value.trim()||'computed')); D.rows.forEach((r,i)=>r.push(out[i])); dataChanged(true);
+  });
+}
+function need2(){ if (!D.cols.length){ alert('Load some data first.'); throw new Error('no data'); } }
+
+/* ================= Results ================= */
+function addResult(title, html){
+  const el=document.createElement('article'); el.className='card';
+  el.innerHTML=`<header><h3>${esc(title)}</h3><span class="meta">${new Date().toLocaleString()}</span><button class="x" title="Remove">×</button></header><div class="body">${html}</div>`;
+  $('#results').prepend(el); saveResults(); showTab('results'); window.scrollTo({top:0});
+}
+$('#results').addEventListener('click', e=>{ if (e.target.matches('.card>header .x')){ e.target.closest('.card').remove(); saveResults(); } });
+function saveResults(){ $('#rcount').textContent=$('#results').children.length||''; store.set('statbench.results', $('#results').innerHTML); }
+$('#bClearRes').onclick=()=>{ if ($('#results').children.length && confirm('Remove all results?')){ $('#results').innerHTML=''; saveResults(); } };
+$('#bPrint').onclick=()=>window.print();
+$('#bSaveRes').onclick=()=>{
+  const css=document.querySelector('style').textContent, theme=document.documentElement.dataset.theme||'';
+  download('statbench-results.html', `<!doctype html><html lang="en"${theme?` data-theme="${theme}"`:''}><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>StatBench results</title><style>${css} main{max-width:980px;margin:0 auto}.card .x{display:none}</style></head><body><main><div id="results">${$('#results').innerHTML}</div></main></body></html>`, 'text/html');
+};
+
+/* ================= Shell ================= */
+function showTab(t){
+  document.querySelectorAll('.tabs button').forEach(b=>b.classList.toggle('on', b.dataset.tab===t));
+  $('#tab-data').hidden = t!=='data'; $('#tab-results').hidden = t!=='results';
+}
+document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>showTab(b.dataset.tab));
+(function buildSide(){
+  let h='', last='';
+  for (const [k,A] of Object.entries(AN)){ if (A.g!==last){ h+=`<h4>${A.g}</h4>`; last=A.g; } h+=`<button data-an="${k}">${A.name}</button>`; }
+  $('#side').innerHTML=h;
+  $('#side').addEventListener('click', e=>{ const b=e.target.closest('[data-an]'); if (b) openAnalysis(b.dataset.an); });
+})();
+const THEMES=['auto','light','dark'];
+function applyTheme(t){
+  if (t==='auto') delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme=t;
+  $('#themeBtn').textContent = 'Theme: '+t[0].toUpperCase()+t.slice(1); store.set('statbench.theme',t);
+}
+$('#themeBtn').onclick=()=>applyTheme(THEMES[(THEMES.indexOf(store.get('statbench.theme')||'auto')+1)%3]);
+applyTheme(store.get('statbench.theme')||'auto');
+try { const s=JSON.parse(store.get('statbench.data')||'null'); if (s && Array.isArray(s.cols) && Array.isArray(s.rows)) D=s; } catch {}
+const savedRes=store.get('statbench.results'); if (savedRes) $('#results').innerHTML=savedRes;
+saveResults(); renderData();
+</script>
+</body>
+</html>
