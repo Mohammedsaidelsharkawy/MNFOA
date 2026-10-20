@@ -120,6 +120,7 @@ table.rpt th{background:var(--panel2);font-weight:700}
 .report{margin-top:10px;padding:8px 12px;border-left:3px solid var(--accent);background:var(--accent-soft);border-radius:0 6px 6px 0;font-size:13px}
 .warn{margin-top:8px;padding:8px 12px;border-left:3px solid var(--accent2);background:var(--panel2);border-radius:0 6px 6px 0;font-size:13px}
 .plots{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:12px;margin-top:8px}
+.plots.one{grid-template-columns:1fr}
 svg.plot{width:100%;max-width:640px;height:auto;display:block}
 svg.plot text{fill:var(--muted);font-size:11px;font-family:inherit}
 svg.plot .ttl{fill:var(--text);font-weight:600;font-size:12px}
@@ -199,6 +200,7 @@ textarea.paste{width:100%;min-height:200px;font-family:ui-monospace,monospace;fo
         <button id="bTransform">Transform…</button>
         <button id="bSort">Sort…</button>
         <button id="bFilter">Filter…</button>
+        <button id="bMissing">Missing…</button>
         <span class="sep"></span>
         <button id="bExport">Export CSV</button>
         <button id="bClear" class="danger">Clear</button>
@@ -685,6 +687,14 @@ const SAMPLES={
       for (let i=1;i<=48;i++){ const dr=i%2===1, b=140+R.n()*12, sl=dr?-5:-1.2;
         rows.push([i,dr?'Drug':'Placebo',R.u()<0.5?'Male':'Female',b.toFixed(1),...[1,2,3].map(k=>(b+sl*k+R.n()*5).toFixed(1))]); }
       return rows; }},
+  meta:{ name:'Meta-analysis — 12 trials', desc:'12 randomized trials with events/totals per arm (binary outcome), means/SDs/Ns (continuous outcome) and a log hazard ratio with SE. Use the three Meta-analysis procedures.',
+    make(){ const R=rng(2024), rows=[['study','year','events_trt','total_trt','events_ctl','total_ctl','mean_trt','sd_trt','n_trt','mean_ctl','sd_ctl','n_ctl','log_hr','se_log_hr']];
+      const names=['Ahmed','Brown','Chen','Davis','El-Sayed','Fischer','Garcia','Hassan','Ito','Johnson','Khalil','Lopez'];
+      names.forEach((nm,i)=>{ const n1=Math.round(40+R.u()*160), n0=Math.round(n1*(0.9+R.u()*0.2)), p0=0.25+R.u()*0.2, lor=Math.log(0.65)+R.n()*0.25;
+        const p1=1/(1+Math.exp(-(Math.log(p0/(1-p0))+lor))), e1=Math.round(n1*p1+R.n()*Math.sqrt(n1*p1*(1-p1))), e0=Math.round(n0*p0+R.n()*Math.sqrt(n0*p0*(1-p0)));
+        const sdv=8+R.u()*4, md=-3+R.n()*1.5, se=0.12+R.u()*0.2;
+        rows.push([`${nm} ${2010+i}`,2010+i,Math.max(0,e1),n1,Math.max(0,e0),n0,(50+md+R.n()*sdv/Math.sqrt(n1)).toFixed(1),(sdv+R.n()*0.8).toFixed(1),n1,(50+R.n()*sdv/Math.sqrt(n0)).toFixed(1),(sdv+R.n()*0.8).toFixed(1),n0,(Math.log(0.75)+R.n()*se).toFixed(3),se.toFixed(3)]); });
+      return rows; }},
   survey:{ name:'Questionnaire — 10 Likert items', desc:'150 respondents answering 10 items (1–5) measuring two constructs (satisfaction, workload) plus gender, age group and department. Use Cronbach\'s α, PCA, correlation and chi-square.',
     make(){ const R=rng(5150), rows=[['id','gender','age_group','department',...[1,2,3,4,5].map(k=>`sat${k}`),...[1,2,3,4,5].map(k=>`work${k}`)]];
       for (let i=1;i<=150;i++){ const s=R.n(), w=R.n(), lk=v=>Math.round(clip(3+v*1.1,1,5));
@@ -782,6 +792,7 @@ $('#bCompute').onclick=()=>openCompute();
 $('#bRecode').onclick=()=>openRecode();
 $('#bSort').onclick=()=>openSort();
 $('#bFilter').onclick=()=>openFilter();
+$('#bMissing').onclick=()=>openMissing();
 $('#bFilterOff').onclick=()=>{ snap(); D.filter=undefined; dataChanged(true); };
 $('#bUndo').onclick=undo;
 document.addEventListener('keydown', e=>{
@@ -1186,6 +1197,107 @@ function consortSVG(o){
   const y5=y4+92; g+=cols.map(cx=>arr(cx,y4+76,cx,y5+32)).join('')+sec(y5,'Analysis',k=>[{t:`Analysed (n=${o.alloc[k]-o.lost[k]-o.disc[k]-o.exAn[k]})`,bold:true},`Excluded from analysis (n=${o.exAn[k]})`],44);
   return `<svg class="plot consort" viewBox="0 0 ${W} ${y5+84}" role="img">${g}</svg>`;
 }
+function delongMulti(scores, pos){ // scores: k arrays (same cases), pos: boolean per case → AUCs and covariance (DeLong 1988)
+  const P=pos.map((v,i)=>v?i:-1).filter(i=>i>=0), Nn=pos.map((v,i)=>v?-1:i).filter(i=>i>=0), m=P.length, n=Nn.length;
+  const V10=[], V01=[], auc=[];
+  for (const s of scores){
+    const sp=P.map(i=>s[i]), sn=Nn.map(i=>s[i]), rc=rank([...sp,...sn]).r, rp=rank(sp).r, rn=rank(sn).r;
+    const v10=sp.map((_,i)=>(rc[i]-rp[i])/n), v01=sn.map((_,j)=>1-(rc[m+j]-rn[j])/m); V10.push(v10); V01.push(v01); auc.push(mean(v10));
+  }
+  const cov=(A,a,b)=>{ const ma=mean(A[a]), mb=mean(A[b]); return sum(A[a].map((v,i)=>(v-ma)*(A[b][i]-mb)))/(A[a].length-1); };
+  const S=scores.map((_,a)=>scores.map((_,b)=>cov(V10,a,b)/m+cov(V01,a,b)/n));
+  return {auc,S,m,n};
+}
+function hosmerLemeshow(pr,y,g=10){
+  const ord=pr.map((_,i)=>i).sort((a,b)=>pr[a]-pr[b]), n=pr.length, rows=[]; let chi=0;
+  for (let k=0;k<g;k++){ const ii=ord.slice(Math.round(k*n/g),Math.round((k+1)*n/g)); if (!ii.length) continue;
+    const o1=sum(ii.map(i=>y[i])), e1=sum(ii.map(i=>pr[i])), nk=ii.length, o0=nk-o1, e0=nk-e1;
+    if (e1>0) chi+=(o1-e1)**2/e1; if (e0>0) chi+=(o0-e0)**2/e0; rows.push([k+1,nk,o1,f(e1,2),o0,f(e0,2)]); }
+  const df=rows.length-2; return {chi,df,p:chiUpper(chi,df),rows};
+}
+function selectVars(xs, kind, rows, okY, Y, method){ // p-value based selection on a common complete-case set
+  const all=buildDesign(rows,xs,okY), okAll=new Set(all.idx);
+  const fit=js=>{ const d=buildDesign(rows,js,i=>okAll.has(i)), y=d.idx.map(i=>Y(i));
+    if (kind==='lin'){ const m=ols(d.X,y); return m?{dev:m.sse, k:d.X[0].length, n:y.length}:null; }
+    const m=logitFit(d.X,y); return m?{dev:-2*m.ll, k:d.X[0].length, n:y.length}:null; };
+  const pCmp=(sub,sup)=>{ const a=fit(sub), b=fit(sup); if (!a||!b) return NaN; const dk=b.k-a.k; if (dk<=0) return NaN;
+    if (kind==='lin'){ const dfe=b.n-b.k; return dfe>0?fUpper(((a.dev-b.dev)/dk)/(b.dev/dfe),dk,dfe):NaN; }
+    return chiUpper(a.dev-b.dev,dk); };
+  const steps=[]; let cur=method==='backward'?xs.slice():[];
+  const tryRemove=()=>{ let worst=null, wp=-1; for (const j of cur){ const p=pCmp(cur.filter(v=>v!==j),cur); if (p>wp){ wp=p; worst=j; } }
+    if (worst!=null && wp>0.10){ cur=cur.filter(v=>v!==worst); steps.push(['Removed',cname(worst),fp(wp)]); return true; } return false; };
+  const tryAdd=()=>{ let best=null, bp=2; for (const j of xs) if (!cur.includes(j)){ const p=pCmp(cur,[...cur,j]); if (p<bp){ bp=p; best=j; } }
+    if (best!=null && bp<0.05){ cur=[...cur,best]; steps.push(['Entered',cname(best),fp(bp)]); return true; } return false; };
+  for (let it=0; it<50; it++){
+    if (method==='backward'){ if (!tryRemove()) break; }
+    else { const added=tryAdd(); if (method==='stepwise') while (tryRemove()); if (!added) break; }
+  }
+  return {sel:cur, steps, n:all.idx.length};
+}
+function metaCore(st, {ratio, label}){ // st: [{name, y, se}] on analysis scale (log for ratios)
+  const k=st.length, w=st.map(s=>1/s.se**2), W=sum(w), fe=sum(st.map((s,i)=>w[i]*s.y))/W, fese=Math.sqrt(1/W);
+  const Q=sum(st.map((s,i)=>w[i]*(s.y-fe)**2)), df=k-1, C=W-sum(w.map(v=>v*v))/W, tau2=Math.max(0,(Q-df)/C), I2=Q>0?Math.max(0,(Q-df)/Q):0;
+  const wr=st.map(s=>1/(s.se**2+tau2)), Wr=sum(wr), re=sum(st.map((s,i)=>wr[i]*s.y))/Wr, rese=Math.sqrt(1/Wr), z=1.959964;
+  const tr=v=>ratio?Math.exp(v):v;
+  let egger=null; if (k>=3){ const X=st.map(s=>[1,1/s.se]), yy=st.map(s=>s.y/s.se), m=ols(X,yy); if (m){ const se0=Math.sqrt(m.inv[0][0]*m.sse/(k-2)); egger={b0:m.b[0], t:m.b[0]/se0, p:pT(m.b[0]/se0,k-2,'two')}; } }
+  return {k, w:w.map(v=>v/W), wr:wr.map(v=>v/Wr), fe:{est:fe,se:fese,lo:fe-z*fese,hi:fe+z*fese,p:pZ(fe/fese,'two')}, re:{est:re,se:rese,lo:re-z*rese,hi:re+z*rese,p:pZ(re/rese,'two')}, Q, df, pQ:chiUpper(Q,df), I2, tau2, tr, egger};
+}
+function forestSVG(st, M, {ratio, label, left='Lower in treatment group', right='Higher in treatment group', random=true}){
+  const rowH=22, top=48, W=760, nameW=170, plotL=nameW+10, plotW=330, textX=plotL+plotW+18, H=top+(st.length+3)*rowH+64;
+  const pts=[...st.flatMap(s=>[s.y-1.96*s.se,s.y+1.96*s.se]), M.fe.lo, M.fe.hi, M.re.lo, M.re.hi].filter(Number.isFinite);
+  let lo=Math.min(...pts,0), hi=Math.max(...pts,0); const pad=(hi-lo)*0.05; lo-=pad; hi+=pad;
+  const sx=v=>plotL+(Math.max(lo,Math.min(hi,v))-lo)/(hi-lo)*plotW, tr=M.tr, fm=v=>f(tr(v),2);
+  let g=`<text class="ttl" x="8" y="18">Forest plot (${esc(label)})</text><text x="8" y="${top-10}" style="font-weight:700">Study</text><text x="${textX}" y="${top-10}" style="font-weight:700">${esc(label)} [95% CI]</text><text x="${W-8}" y="${top-10}" text-anchor="end" style="font-weight:700">Weight</text>`;
+  st.forEach((s,i)=>{ const y=top+i*rowH+rowH/2, l=s.y-1.96*s.se, h=s.y+1.96*s.se, sz=4+12*Math.sqrt((random?M.wr:M.w)[i]);
+    g+=`<text x="8" y="${y+4}">${esc(String(s.name).slice(0,26))}</text><line x1="${sx(l)}" x2="${sx(h)}" y1="${y}" y2="${y}" style="stroke:var(--text);stroke-width:1.3"/><rect x="${sx(s.y)-sz/2}" y="${y-sz/2}" width="${sz}" height="${sz}" style="fill:${PAL[0]}"/>`;
+    g+=`<text x="${textX}" y="${y+4}">${fm(s.y)} [${fm(l)}, ${fm(h)}]</text><text x="${W-8}" y="${y+4}" text-anchor="end">${f(100*(random?M.wr:M.w)[i],1)}%</text>`; });
+  const dia=(r,y,col,lab)=>`<path d="M${sx(r.lo)},${y}L${sx(r.est)},${y-7}L${sx(r.hi)},${y}L${sx(r.est)},${y+7}Z" style="fill:${col}"/><text x="8" y="${y+4}" style="font-weight:700">${lab}</text><text x="${textX}" y="${y+4}" style="font-weight:700">${fm(r.est)} [${fm(r.lo)}, ${fm(r.hi)}]</text>`;
+  const yF=top+(st.length+0.7)*rowH, yR=yF+rowH;
+  g+=dia(M.fe,yF,PAL[2],'Fixed effect')+dia(M.re,yR,PAL[1],'Random effects');
+  const yb=yR+rowH, nx=sx(0); g+=`<line x1="${nx}" x2="${nx}" y1="${top-4}" y2="${yb}" style="stroke:var(--muted);stroke-dasharray:4 3"/><line x1="${plotL}" x2="${plotL+plotW}" y1="${yb}" y2="${yb}" class="axis"/>`;
+  const tks = ratio ? [0.01,0.02,0.05,0.1,0.2,0.5,1,2,5,10,20,50,100].map(Math.log).filter(t=>t>=lo&&t<=hi) : niceTicks(lo,hi,5).ticks.filter(t=>t>=lo&&t<=hi);
+  (ratio && tks.length<3 ? [0.25,0.5,0.75,1,1.5,2,3,4].map(Math.log).filter(t=>t>=lo&&t<=hi) : tks).forEach(t=>{ g+=`<line x1="${sx(t)}" x2="${sx(t)}" y1="${yb}" y2="${yb+4}" class="axis"/><text x="${sx(t)}" y="${yb+16}" text-anchor="middle">${tickFmt(+tr(t).toPrecision(3))}</text>`; });
+  g+=`<text x="${plotL+plotW*0.25}" y="${yb+32}" text-anchor="middle">← ${esc(left)}</text><text x="${plotL+plotW*0.75}" y="${yb+32}" text-anchor="middle">${esc(right)} →</text>`;
+  g+=`<text x="8" y="${yb+54}">Heterogeneity: Q = ${f(M.Q,2)}, df = ${M.df}, p ${fp(M.pQ)}; I² = ${f(100*M.I2,1)}%, τ² = ${f(M.tau2,3)}</text>`;
+  return `<svg class="plot" viewBox="0 0 ${W} ${H}" role="img" style="max-width:900px">${g}</svg>`;
+}
+function barChartSVG(cats, series, {ylab,xlab,title,values=false}={}){ // series: [{name, vals, lo?, hi?}]
+  const all=series.flatMap(s=>[...s.vals,...(s.hi||[]),...(s.lo||[])]).filter(Number.isFinite);
+  const Pl=makePlot({ymin:Math.min(0,...all),ymax:Math.max(...all)*(values?1.08:1),cats,ylab,xlab,title,legend:series.length>1?series.map(s=>s.name):null});
+  const slot=Pl.pw/cats.length*0.75, bw=slot/series.length; let g='';
+  cats.forEach((c,i)=>series.forEach((s,k)=>{ const v=s.vals[i]; if (!Number.isFinite(v)) return; const x=Pl.sx(i)-slot/2+k*bw, col=series.length>1?PAL[k%PAL.length]:PAL[i%PAL.length], y0=Pl.sy(0), y=Pl.sy(v);
+    g+=`<rect x="${x+1.5}" y="${Math.min(y,y0)}" width="${Math.max(1,bw-3)}" height="${Math.abs(y0-y)}" rx="2" style="fill:${col};opacity:.9"><title>${esc(s.name?s.name+', ':'')}${esc(c)}: ${f(v,2)}</title></rect>`;
+    const xc=x+bw/2;
+    if (s.lo && Number.isFinite(s.lo[i])){ const a=Pl.sy(s.hi[i]), b=Pl.sy(s.lo[i]); g+=`<path d="M${xc},${a}V${b}M${xc-6},${a}H${xc+6}M${xc-6},${b}H${xc+6}" style="stroke:var(--text);stroke-width:1.3;fill:none"/>`; }
+    if (values) g+=`<text x="${xc}" y="${Math.min(y, s.hi&&Number.isFinite(s.hi[i])?Pl.sy(s.hi[i]):y)-5}" text-anchor="middle" style="fill:var(--text)">${f(v,v>=100?0:v>=10?1:2)}</text>`; }));
+  return Pl.wrap(g);
+}
+function pieSVG(labels, counts, {title}={}){
+  const W=600, H=360, cx=200, cy=H/2+10, r=130, tot=sum(counts); let a0=-Math.PI/2, g=title?`<text class="ttl" x="20" y="22">${esc(title)}</text>`:'';
+  counts.forEach((c,i)=>{ const a1=a0+2*Math.PI*c/tot, col=PAL[i%PAL.length], big=a1-a0>Math.PI?1:0;
+    const p=c===tot?`<circle cx="${cx}" cy="${cy}" r="${r}" style="fill:${col}"/>`:`<path d="M${cx},${cy}L${cx+r*Math.cos(a0)},${cy+r*Math.sin(a0)}A${r},${r} 0 ${big} 1 ${cx+r*Math.cos(a1)},${cy+r*Math.sin(a1)}Z" style="fill:${col};stroke:var(--panel);stroke-width:1.5"/>`;
+    const am=(a0+a1)/2, pct=100*c/tot; g+=p+(pct>=4?`<text x="${cx+r*0.62*Math.cos(am)}" y="${cy+r*0.62*Math.sin(am)+4}" text-anchor="middle" style="fill:#fff;font-weight:700">${f(pct,1)}%</text>`:'');
+    g+=`<rect x="370" y="${70+i*22}" width="12" height="12" rx="2" style="fill:${col}"/><text x="388" y="${80+i*22}" style="fill:var(--text)">${esc(String(labels[i]).slice(0,24))} — ${c} (${f(pct,1)}%)</text>`; a0=a1; });
+  return `<svg class="plot" viewBox="0 0 ${W} ${H}" role="img">${g}</svg>`;
+}
+function metaReport(st,{ratio,label,random,drop=[]}){
+  need(st.length>=2,'Need at least 2 studies with complete data.');
+  const M=metaCore(st,{ratio,label}), tr=M.tr, fm=v=>f(tr(v),3), z=1.959964;
+  const R=random?M.re:M.fe, other=random?M.fe:M.re;
+  let out=table(['Model','Pooled '+label,'95% CI','z','p'],[['Fixed effect (inverse variance)',`<b>${fm(M.fe.est)}</b>`,`[${fm(M.fe.lo)}, ${fm(M.fe.hi)}]`,f(M.fe.est/M.fe.se),P(M.fe.p)],['Random effects (DerSimonian–Laird)',`<b>${fm(M.re.est)}</b>`,`[${fm(M.re.lo)}, ${fm(M.re.hi)}]`,f(M.re.est/M.re.se),P(M.re.p)]])
+    + h5('Heterogeneity')+table(['Q','df','p','I²','τ²'],[[f(M.Q),M.df,P(M.pQ),f(100*M.I2,1)+'%',f(M.tau2,4)]])
+    + h5('Individual studies')+table(['Study',label,'95% CI','Weight (fixed)','Weight (random)'],st.map((s,i)=>[esc(s.name),fm(s.y),`[${fm(s.y-z*s.se)}, ${fm(s.y+z*s.se)}]`,f(100*M.w[i],1)+'%',f(100*M.wr[i],1)+'%']));
+  if (M.egger) out+=h5("Egger's test for funnel plot asymmetry")+table(['Intercept','t','df','p'],[[f(M.egger.b0),f(M.egger.t),M.k-2,P(M.egger.p)]]);
+  const fun=(()=>{ const ses=st.map(s=>s.se), mx=Math.max(...ses)*1.1, xs=st.map(s=>s.y), c=R.est;
+    const Pl=makePlot({xmin:Math.min(...xs,c-1.96*mx),xmax:Math.max(...xs,c+1.96*mx),ymin:0,ymax:mx,xlab:ratio?`log ${label}`:label,ylab:'Standard error (inverted)',title:'Funnel plot'});
+    const sy=v=>Pl.sy(mx-v); let g=`<path d="M${Pl.sx(c-1.96*mx)},${sy(mx)}L${Pl.sx(c)},${sy(0)}L${Pl.sx(c+1.96*mx)},${sy(mx)}" class="ref"/><line class="line" x1="${Pl.sx(c)}" x2="${Pl.sx(c)}" y1="${sy(0)}" y2="${sy(mx)}"/>`;
+    st.forEach(s=>{ g+=`<circle class="pt" cx="${Pl.sx(s.y)}" cy="${sy(s.se)}" r="4.5"><title>${esc(s.name)}</title></circle>`; }); return Pl.wrap(g); })();
+  if (M.I2>0.5) out+=warn(`Substantial heterogeneity (I² = ${f(100*M.I2,0)}%) — the random-effects estimate is more appropriate, and sources of heterogeneity should be explored.`);
+  if (drop.length) out+=note(`Excluded (no events or all events in both arms): ${drop.map(esc).join(', ')}.`);
+  return out+`<div class="plots one">${forestSVG(st,M,{ratio,label,random})}</div><div class="plots">${fun}</div>`
+    + note(`${M.k} studies. ${ratio?'Analyses were performed on the log scale and back-transformed.':''} Funnel axes on the analysis scale; Egger's test needs ≥ 10 studies to be reliable.`)
+    + report(`${random?'Random-effects':'Fixed-effect'} pooled ${label} = ${fm(R.est)} (95% CI ${fm(R.lo)}–${fm(R.hi)}), p ${pAPA(R.p)}; I² = ${f(100*M.I2,0)}%`);
+}
 function buildDesign(rows, xs, ok){ // dummy-codes text predictors (first level = reference)
   const isN=xs.map(colIsNum), S=xs.map((j,k)=>rows.map(r=>isN[k]?toNum(r[j]):(isMiss(r[j])?null:String(r[j]).trim())));
   const idx=[]; rows.forEach((_,i)=>{ if (ok(i) && xs.every((j,k)=>isN[k]?Number.isFinite(S[k][i]):S[k][i]!=null)) idx.push(i); });
@@ -1416,9 +1528,13 @@ corr:{ g:'Relationships', name:'Correlation matrix',
     return table(['',...V.map(cname)],cells,'res corr')+note(`${({pearson:'Pearson',spearman:'Spearman rank',kendall:'Kendall τ-b (asymptotic p)'})[o.method]} correlations, pairwise deletion. * p < .05, ** p < .01, *** p < .001 (two-sided).`);
   }},
 reg:{ g:'Relationships', name:'Linear regression',
-  fields:[{k:'y',t:'num',label:'Dependent variable'},{k:'xs',t:'cols',label:'Predictors (text columns are dummy-coded)'},{k:'plots',t:'check',label:'Residual diagnostics plots',def:true},{k:'save',t:'check',label:'Save predicted values & residuals as new columns'}],
+  fields:[{k:'y',t:'num',label:'Dependent variable'},{k:'xs',t:'cols',label:'Predictors (text columns are dummy-coded)'},{k:'sel',t:'select',label:'Variable selection',options:[['enter','Enter — all predictors'],['forward','Forward (p < 0.05 to enter)'],['backward','Backward (p > 0.10 to remove)'],['stepwise','Stepwise (enter p < 0.05, remove p > 0.10)']]},{k:'plots',t:'check',label:'Residual diagnostics plots',def:true},{k:'save',t:'check',label:'Save predicted values & residuals as new columns'}],
   run(o){
-    const xs=o.xs.filter(j=>j!==o.y); need(xs.length,'Select at least one predictor (other than the dependent variable).');
+    let xs=o.xs.filter(j=>j!==o.y); need(xs.length,'Select at least one predictor (other than the dependent variable).');
+    let selOut='';
+    if (o.sel&&o.sel!=='enter'){ const Yn=numCol(o.y), S=selectVars(xs,'lin',AR(),i=>Number.isFinite(Yn[i]),i=>Yn[i],o.sel);
+      selOut=h5(`Variable selection (${o.sel}, partial F-tests)`)+(S.steps.length?table(['Action','Variable','p'],S.steps):note('No variable met the criteria to change the model.'));
+      need(S.sel.length,'No predictor met the entry criterion (p < 0.05).'); xs=S.sel; }
     const rows=AR(), Y=numCol(o.y), {idx,terms,cols,X}=buildDesign(rows,xs,i=>Number.isFinite(Y[i]));
     const n=idx.length, p=terms.length; need(n>p,`Not enough complete cases (${n}) for ${p} parameters.`);
     const y=idx.map(i=>Y[i]), M=ols(X,y);
@@ -1429,7 +1545,7 @@ reg:{ g:'Relationships', name:'Linear regression',
       return [terms[k],f(b),f(se),k?f(b*sd(cols[k-1])/sy):'',f(t),P(pp),ci([b-tq*se,b+tq*se]),k?f(vif[k-1],2):'']; });
     let dw=0; for (let i=1;i<n;i++) dw+=(M.res[i]-M.res[i-1])**2; dw/=M.sse;
     const eq='ŷ = '+M.b.map((b,k)=>k?`${b<0?'−':'+'} ${f(Math.abs(b))}·${terms[k]}`:f(b)).join(' ');
-    let out=h5('Model summary')+table(['N','R','R²','Adjusted R²','Std. error of estimate','Durbin–Watson'],[[n,f(Math.sqrt(M.r2)),f(M.r2),f(adj),f(Math.sqrt(mse)),f(dw)]])
+    let out=selOut+h5('Model summary')+table(['N','R','R²','Adjusted R²','Std. error of estimate','Durbin–Watson'],[[n,f(Math.sqrt(M.r2)),f(M.r2),f(adj),f(Math.sqrt(mse)),f(dw)]])
       + h5('ANOVA')+table(['Source','Sum of squares','df','Mean square','F','p'],[['Regression',f(ssr),dfr,f(ssr/dfr),f(F),P(pF)],['Residual',f(M.sse),dfe,f(mse),'',''],['Total',f(M.sst),n-1,'','','']])
       + h5('Coefficients')+table(['Term','B','SE','β (std.)','t','p','95% CI','VIF'],coef)
       + note(`${esc(D.cols[o.y])}: ${eq}`) + note(`${rows.length-n} rows excluded for missing values (listwise).`);
@@ -1561,9 +1677,13 @@ friedman:{ g:'Nonparametric', name:'Friedman test',
       + report(`χ²<sub>F</sub>(${df}) = ${f(Q,2)}, p ${pAPA(p)}, W = ${f(Q/(n*(k-1)),2)}`);
   }},
 logreg:{ g:'Relationships', name:'Logistic regression',
-  fields:[{k:'y',t:'col',label:'Outcome variable',prefCat:true,nth:1},{k:'ev',t:'level',of:'y',label:'Event value (coded 1; all other values = 0)'},{k:'xs',t:'cols',label:'Predictors (text columns are dummy-coded)'},{k:'save',t:'check',label:'Save predicted probabilities as a new column'}],
+  fields:[{k:'y',t:'col',label:'Outcome variable',prefCat:true,nth:1},{k:'ev',t:'level',of:'y',label:'Event value (coded 1; all other values = 0)'},{k:'xs',t:'cols',label:'Predictors (text columns are dummy-coded)'},{k:'sel',t:'select',label:'Variable selection',options:[['enter','Enter — all predictors'],['forward','Forward (p < 0.05 to enter)'],['backward','Backward (p > 0.10 to remove)'],['stepwise','Stepwise (enter p < 0.05, remove p > 0.10)']]},{k:'save',t:'check',label:'Save predicted probabilities as a new column'}],
   run(o){
-    const xs=o.xs.filter(j=>j!==o.y); need(xs.length,'Select at least one predictor (other than the outcome).');
+    let xs=o.xs.filter(j=>j!==o.y); need(xs.length,'Select at least one predictor (other than the outcome).');
+    let selOut='';
+    if (o.sel&&o.sel!=='enter'){ const Yl=strCol(o.y), S=selectVars(xs,'log',AR(),i=>Yl[i]!=null,i=>Yl[i]===o.ev?1:0,o.sel);
+      selOut=h5(`Variable selection (${o.sel}, likelihood-ratio tests)`)+(S.steps.length?table(['Action','Variable','p'],S.steps):note('No variable met the criteria to change the model.'));
+      need(S.sel.length,'No predictor met the entry criterion (p < 0.05).'); xs=S.sel; }
     const rows=AR(), Ys=strCol(o.y), {idx,terms,X}=buildDesign(rows,xs,i=>Ys[i]!=null);
     const y=idx.map(i=>Ys[i]===o.ev?1:0), n=y.length, p=terms.length, n1=sum(y);
     need(n>p,`Not enough complete cases (${n}) for ${p} parameters.`);
@@ -1577,9 +1697,11 @@ logreg:{ g:'Relationships', name:'Logistic regression',
     const rk=rank(M.pr).r, auc=(sum(rk.filter((_,i)=>y[i]))-n1*(n1+1)/2)/(n1*(n-n1));
     const ord=M.pr.map((q,i)=>i).sort((a,b)=>M.pr[b]-M.pr[a]), fx=[0], ty=[0]; let cT=0,cF=0;
     ord.forEach((i,r)=>{ y[i]?cT++:cF++; if (r===ord.length-1 || M.pr[ord[r+1]]!==M.pr[i]){ fx.push(cF/(n-n1)); ty.push(cT/n1); } });
-    let out=h5('Model fit')+table(['N','Events','−2 log-likelihood','LR χ²','df','p','McFadden R²','Cox–Snell R²','Nagelkerke R²','AIC','AUC'],
+    const hl=hosmerLemeshow(M.pr,y);
+    let out=selOut+h5('Model fit')+table(['N','Events','−2 log-likelihood','LR χ²','df','p','McFadden R²','Cox–Snell R²','Nagelkerke R²','AIC','AUC'],
         [[n,n1,f(-2*M.ll),f(lr),dfm,P(plr),f(1-M.ll/ll0),f(cs),f(nag),f(-2*M.ll+2*p),f(auc)]])
       + h5('Coefficients')+table(['Term','B','SE','Wald z','p','Odds ratio','95% CI (OR)'],coef)
+      + h5('Hosmer–Lemeshow goodness of fit')+table(['χ²','df','p','Interpretation'],[[f(hl.chi),hl.df,P(hl.p),hl.p<0.05?'poor fit (observed ≠ predicted)':'adequate fit']])
       + h5('Classification (cutoff 0.5)')+table(['Observed \\ Predicted','0','1','% correct'],[
         [`0 (not ${esc(o.ev)})`,tn,fpos,f(100*tn/(n-n1),1)],[`1 (${esc(o.ev)})`,fneg,tp,f(100*tp/n1,1)],['<b>Overall</b>','','',`<b>${f(100*(tp+tn)/n,1)}</b>`]])
       + note(`Outcome coded 1 = "${esc(o.ev)}", 0 = other values. ${rows.length-n} rows excluded for missing values. Converged in ${M.it+1} iterations.`);
@@ -1972,58 +2094,63 @@ kmeans:{ g:'Multivariate', name:'K-means clustering',
       + note(`k-means++ initialization with Hartigan refinement, best of 50 runs (fixed seed, so results are reproducible). ${o.std?'Variables standardized to z-scores. ':''}${AR().length-n} incomplete rows excluded.`);
   }},
 table1:{ g:'Reports', name:'Group comparison table', report:true,
-  fields:[{k:'g',t:'col',label:'Grouping variable (e.g. study groups)',prefCat:true},{k:'vars',t:'cols',label:'Variables to compare (numeric and categorical)'},
+  fields:[{k:'g',t:'col',label:'Grouping variable (e.g. study groups) — choose “none” for a descriptive table',prefCat:true,optional:true},{k:'vars',t:'cols',label:'Variables to compare (numeric and categorical)'},
     {k:'mode',t:'select',label:'Numeric variables',options:[['auto','Auto — Shapiro–Wilk decides (normal → mean ± SD, otherwise median & IQR)'],['param','Always mean ± SD (t-test / ANOVA)'],['nonpar','Always median & IQR (Mann–Whitney / Kruskal–Wallis)']]},
     {k:'layout',t:'select',label:'Layout',options:[['stacked','Stacked — statistic rows under each variable (like a demographics table)'],['wide','One row per variable — e.g. repeated time points']]},
     {k:'title',t:'text',label:'Table title',def:'Demographic data of the studied groups'},
+    {k:'total',t:'check',label:'Add a Total column (all groups combined)'},
     {k:'within',t:'check',label:'Time-point layout: add within-group P value across time points',def:true},
     {k:'text',t:'check',label:'Write results paragraphs',def:true},{k:'methods',t:'check',label:'Add statistical analysis (methods) paragraph',def:true},{k:'figs',t:'check',label:'Add figures',def:true}],
   run(o){
-    const vars=o.vars.filter(j=>j!==o.g); need(vars.length,'Select at least one variable to compare.');
-    const G=strCol(o.g), lv=sortLevels([...new Set(G.filter(v=>v!=null))]); need(lv.length>=2,'The grouping variable needs at least 2 groups.'); need(lv.length<=6,'At most 6 groups.');
-    const ng=lv.map(L=>G.filter(v=>v===L).length), two=lv.length===2, wide=o.layout==='wide';
+    const noG=o.g<0, vars=o.vars.filter(j=>j!==o.g); need(vars.length,'Select at least one variable to compare.');
+    const G=noG?AR().map(()=>'Total'):strCol(o.g), glv=noG?['Total']:sortLevels([...new Set(G.filter(v=>v!=null))]);
+    need(noG||glv.length>=2,'The grouping variable needs at least 2 groups.'); need(glv.length<=6,'At most 6 groups.');
+    const showTot=!noG&&o.total, lv=showTot?[...glv,'Total']:glv, ngr=glv.length, inG=(L,i)=>(showTot&&L==='Total')?G[i]!=null:G[i]===L;
+    const gname=k=>noG?'the whole sample':lv[k];
+    const ng=lv.map(L=>G.filter((_,i)=>inG(L,i)).length), two=ngr===2, wide=o.layout==='wide';
     const nf=x=>Number.isFinite(x)?String(+x.toFixed(2)):'—', pf=p=>!Number.isFinite(p)?'—':p<0.001?'<0.001*':p.toFixed(3)+(p<=0.05?'*':'');
     const pc=p=>Number.isFinite(p)&&p<=0.05?`<b>${pf(p)}</b>`:pf(p), pw=p=>p<0.001?'< 0.001':'= '+p.toFixed(3);
     const used=new Set();
     const items=vars.map(j=>{
-      if (colIsNum(j)){ const v=numCol(j), arrs=lv.map(L=>v.filter((x,i)=>G[i]===L&&Number.isFinite(x)));
-        const np=o.mode==='nonpar'||(o.mode==='auto'&&arrs.some(a=>a.length>=3&&(shapiroWilk(a)||{p:1}).p<0.05));
+      if (colIsNum(j)){ const v=numCol(j), arrs=lv.map(L=>v.filter((x,i)=>inG(L,i)&&Number.isFinite(x)));
+        const np=o.mode==='nonpar'||(o.mode==='auto'&&arrs.slice(0,ngr).some(a=>a.length>=3&&(shapiroWilk(a)||{p:1}).p<0.05));
         return {j, kind:'num', np, arrs, S:arrs.map(a=>a.length?summary(a):{n:0})}; }
       const s=strCol(j), L=sortLevels([...new Set(s.filter((x,i)=>x!=null&&G[i]!=null))]);
-      const O=L.map(c=>lv.map(g=>s.filter((x,i)=>x===c&&G[i]===g).length)), tot=lv.map((_,k)=>sum(O.map(r=>r[k])));
+      const O=L.map(c=>lv.map(g=>s.filter((x,i)=>x===c&&inG(g,i)).length)), tot=lv.map((_,k)=>sum(O.map(r=>r[k])));
       return {j, kind:'cat', L, O, tot};
     });
     if (wide && o.mode==='auto'){ const anyNp=items.some(it=>it.kind==='num'&&it.np); items.forEach(it=>{ if (it.kind==='num') it.np=anyNp; }); }
     items.forEach(it=>{
-      if (it.kind==='num'){ if (it.arrs.some(a=>a.length<2)){ it.p=NaN; return; }
-        if (it.np){ used.add(two?'mw':'kw'); it.p=two?mwP(it.arrs[0],it.arrs[1]):kwP(it.arrs); }
-        else { used.add(two?'t':'anova'); it.p=two?studentP(it.arrs[0],it.arrs[1]):anova1(it.arrs).p; } }
-      else { if (it.L.length<2){ it.p=NaN; return; } const r=catTest(it.O); it.p=r.p; used.add(r.test); }
+      if (noG){ it.p=NaN; return; }
+      if (it.kind==='num'){ const A=it.arrs.slice(0,ngr); if (A.some(a=>a.length<2)){ it.p=NaN; return; }
+        if (it.np){ used.add(two?'mw':'kw'); it.p=two?mwP(A[0],A[1]):kwP(A); }
+        else { used.add(two?'t':'anova'); it.p=two?studentP(A[0],A[1]):anova1(A).p; } }
+      else { if (it.L.length<2){ it.p=NaN; return; } const r=catTest(it.O.map(row=>row.slice(0,ngr))); it.p=r.p; used.add(r.test); }
     });
     const hdr=(L,k)=>`${esc(L)}<br>(n=${ng[k]})`;
     let T='<table class="rpt"><thead>';
     if (!wide){
-      T+=`<tr><th colspan="2"></th>${lv.map((L,k)=>`<th>${hdr(L,k)}</th>`).join('')}<th>P value</th></tr></thead><tbody>`;
+      T+=`<tr><th colspan="2"></th>${lv.map((L,k)=>`<th>${hdr(L,k)}</th>`).join('')}${noG?'':'<th>P value</th>'}</tr></thead><tbody>`;
       items.forEach(it=>{
         const rows = it.kind==='cat' ? it.L.map((c,i)=>[esc(c),lv.map((_,k)=>`${it.O[i][k]} (${nf(it.tot[k]?100*it.O[i][k]/it.tot[k]:NaN)}%)`)])
           : it.np ? [['Median (IQR)',it.S.map(s=>s.n?`${nf(s.median)} (${nf(s.q1)} - ${nf(s.q3)})`:'—')],['Range',it.S.map(s=>s.n?`${nf(s.min)} - ${nf(s.max)}`:'—')]]
           : [['Mean ± SD',it.S.map(s=>s.n?`${nf(s.mean)} ± ${nf(s.sd)}`:'—')],['Range',it.S.map(s=>s.n?`${nf(s.min)} - ${nf(s.max)}`:'—')]];
-        rows.forEach(([lab,cells],r)=>{ T+=`<tr>${r?'':`<th rowspan="${rows.length}">${cname(it.j)}</th>`}<th>${lab}</th>${cells.map(c=>`<td>${c}</td>`).join('')}${r?'':`<td rowspan="${rows.length}">${pc(it.p)}</td>`}</tr>`; });
+        rows.forEach(([lab,cells],r)=>{ T+=`<tr>${r?'':`<th rowspan="${rows.length}">${cname(it.j)}</th>`}<th>${lab}</th>${cells.map(c=>`<td>${c}</td>`).join('')}${r||noG?'':`<td rowspan="${rows.length}">${pc(it.p)}</td>`}</tr>`; });
       });
     } else {
       const np=items.some(it=>it.kind==='num'&&it.np), sub=np?['Median','IQR']:['Mean ± SD','Range'];
-      T+=`<tr><th rowspan="2"></th>${lv.map((L,k)=>`<th colspan="2">${hdr(L,k)}</th>`).join('')}<th rowspan="2">P value</th></tr><tr>${lv.map(()=>`<th>${sub[0]}</th><th>${sub[1]}</th>`).join('')}</tr></thead><tbody>`;
+      T+=`<tr><th rowspan="2"></th>${lv.map((L,k)=>`<th colspan="2">${hdr(L,k)}</th>`).join('')}${noG?'':'<th rowspan="2">P value</th>'}</tr><tr>${lv.map(()=>`<th>${sub[0]}</th><th>${sub[1]}</th>`).join('')}</tr></thead><tbody>`;
       items.forEach(it=>{
-        if (it.kind==='num') T+=`<tr><th>${cname(it.j)}</th>${it.S.map(s=>!s.n?'<td>—</td><td>—</td>':np?`<td>${nf(s.median)}</td><td>${nf(s.q1)} - ${nf(s.q3)}</td>`:`<td>${nf(s.mean)} ± ${nf(s.sd)}</td><td>${nf(s.min)} - ${nf(s.max)}</td>`).join('')}<td>${pc(it.p)}</td></tr>`;
-        else it.L.forEach((c,i)=>{ T+=`<tr><th>${cname(it.j)}: ${esc(c)}</th>${lv.map((_,k)=>`<td colspan="2">${it.O[i][k]} (${nf(it.tot[k]?100*it.O[i][k]/it.tot[k]:NaN)}%)</td>`).join('')}${i?'':`<td rowspan="${it.L.length}">${pc(it.p)}</td>`}</tr>`; });
+        if (it.kind==='num') T+=`<tr><th>${cname(it.j)}</th>${it.S.map(s=>!s.n?'<td>—</td><td>—</td>':np?`<td>${nf(s.median)}</td><td>${nf(s.q1)} - ${nf(s.q3)}</td>`:`<td>${nf(s.mean)} ± ${nf(s.sd)}</td><td>${nf(s.min)} - ${nf(s.max)}</td>`).join('')}${noG?'':`<td>${pc(it.p)}</td>`}</tr>`;
+        else it.L.forEach((c,i)=>{ T+=`<tr><th>${cname(it.j)}: ${esc(c)}</th>${lv.map((_,k)=>`<td colspan="2">${it.O[i][k]} (${nf(it.tot[k]?100*it.O[i][k]/it.tot[k]:NaN)}%)</td>`).join('')}${i||noG?'':`<td rowspan="${it.L.length}">${pc(it.p)}</td>`}</tr>`; });
       });
     }
     let wp=null;
     if (wide && o.within && items.length>=2 && items.every(it=>it.kind==='num')){
       const np=items[0].np, cols=items.map(it=>numCol(it.j));
-      wp=lv.map(L=>{ const M=G.map((g,i)=>g===L&&cols.every(c=>Number.isFinite(c[i]))?cols.map(c=>c[i]):null).filter(Boolean); return M.length>=3?(np?friedmanP(M):rmAnovaP(M)):NaN; });
+      wp=lv.map(L=>{ const M=G.map((g,i)=>inG(L,i)&&cols.every(c=>Number.isFinite(c[i]))?cols.map(c=>c[i]):null).filter(Boolean); return M.length>=3?(np?friedmanP(M):rmAnovaP(M)):NaN; });
       used.add(np?'friedman':'rm');
-      T+=`<tr><th>P (within group)</th>${wp.map(p=>`<td colspan="2">${pc(p)}</td>`).join('')}<td></td></tr>`;
+      T+=`<tr><th>P (within group)</th>${wp.map(p=>`<td colspan="2">${pc(p)}</td>`).join('')}${noG?'':'<td></td>'}</tr>`;
     }
     T+='</tbody></table>';
     const pres=[]; if (items.some(i=>i.kind==='num'&&!i.np)) pres.push('mean ± SD and range'); if (items.some(i=>i.kind==='num'&&i.np)) pres.push(wide?'median and interquartile range (IQR)':'median (IQR) and range'); if (items.some(i=>i.kind==='cat')) pres.push('frequency (%)');
@@ -2034,19 +2161,20 @@ table1:{ g:'Reports', name:'Group comparison table', report:true,
       if (used.has('mw')||used.has('kw')) m.push(`Quantitative non-parametric data were presented as median and interquartile range (IQR) and were analyzed by ${two?'Mann–Whitney U test':'Kruskal–Wallis test'}.`);
       if (used.has('chi')||used.has('fisher')) m.push(`Qualitative variables were presented as frequency and percentage (%) and were analyzed utilizing the ${used.has('fisher')?'Chi-square test or Fisher\'s exact test when appropriate':'Chi-square test'}.`);
       if (used.has('friedman')||used.has('rm')) m.push(`Comparisons within the same group across time points were performed using ${used.has('friedman')?'the Friedman test':'repeated-measures ANOVA with Greenhouse–Geisser correction'}.`);
-      m.push('A two tailed P value < 0.05 was considered statistically significant.');
+      if (noG) m.push('Quantitative variables were presented as mean ± standard deviation (SD) or median and interquartile range (IQR) as appropriate, and qualitative variables as frequency and percentage (%).');
+      if (!noG||wp) m.push('A two tailed P value < 0.05 was considered statistically significant.');
       out+=`<h5>Statistical analysis</h5><p class="para">Statistical analysis was done by StatBench. ${m.join(' ')}</p>`;
     }
-    out+=`<p class="caption">Table: ${esc(o.title||'Comparison of the studied groups')}</p>${T}<p class="note">*: Significant as P value ≤ 0.05. Data are presented as ${pres.join(', ')}.${wp?` P (within group): ${used.has('friedman')?'Friedman test':'repeated-measures ANOVA'} across time points.`:''}</p>`;
+    out+=`<p class="caption">Table: ${esc(o.title||'Comparison of the studied groups')}</p>${T}<p class="note">${noG&&!wp?'':'*: Significant as P value ≤ 0.05. '}Data are presented as ${pres.join(', ')}.${wp?` P (within group): ${used.has('friedman')?'Friedman test':'repeated-measures ANOVA'} across time points.`:''}</p>`;
     if (o.text){
       const nice=j=>{ const s=D.cols[j].replace(/_/g,' ').replace(/\s*\([^)]*\)\s*$/,'').trim(); return /^[A-Z][a-z]/.test(s)?s[0].toLowerCase()+s.slice(1):s; };
       const unit=j=>{ const m=D.cols[j].match(/\(([^)]*)\)\s*$/); return m?' '+m[1]:''; };
       const cap=s=>s[0].toUpperCase()+s.slice(1), andJ=a=>a.length<2?a.join(''):a.slice(0,-1).join(', ')+' and '+a[a.length-1];
       const P=[]; const ins=[], sig=[];
       items.forEach(it=>{ const nm=nice(it.j), u=unit(it.j);
-        if (it.kind==='num'){ const parts=it.S.map((s,k)=>!s.n?`no data in ${lv[k]}`:it.np?`${nf(s.median)} (${nf(s.q1)}-${nf(s.q3)})${u} in ${lv[k]}`:`${k?'':'The '+nm+' '}ranged from ${nf(s.min)} to ${nf(s.max)}${u} with a mean value (± SD) of ${nf(s.mean)} (±${nf(s.sd)})${u} in ${lv[k]}`);
+        if (it.kind==='num'){ const parts=it.S.slice(0,ngr).map((s,k)=>!s.n?`no data in ${gname(k)}`:it.np?`${nf(s.median)} (${nf(s.q1)}-${nf(s.q3)})${u} in ${gname(k)}`:`${k?'':'The '+nm+' '}ranged from ${nf(s.min)} to ${nf(s.max)}${u} with a mean value (± SD) of ${nf(s.mean)} (±${nf(s.sd)})${u} in ${gname(k)}`);
           P.push(it.np?`The median (IQR) of ${nm} was ${andJ(parts)}.`:`${parts[0]}${parts.length>1?' and '+andJ(parts.slice(1)):''}.`); }
-        else P.push(`There ${it.O[0][0]===1?'was':'were'} ${andJ(lv.map((g,k)=>`${andJ(it.L.map((c,i)=>`${it.O[i][k]} (${nf(it.tot[k]?100*it.O[i][k]/it.tot[k]:NaN)}%) ${/^([A-Za-z]{1,3}|[\d.]+)$/.test(c)?D.cols[it.j]+' '+c:c}`))} in ${g}`))}.`);
+        else P.push(`There ${it.O[0][0]===1?'was':'were'} ${andJ(glv.map((g,k)=>`${andJ(it.L.map((c,i)=>`${it.O[i][k]} (${nf(it.tot[k]?100*it.O[i][k]/it.tot[k]:NaN)}%) ${/^([A-Za-z]{1,3}|[\d.]+)$/.test(c)?D.cols[it.j]+' '+c:c}`))} in ${gname(k)}`))}.`);
         if (!Number.isFinite(it.p)) return;
         if (it.p>0.05) ins.push(nm);
         else if (it.kind==='num'&&two){ const a=it.np?it.S.map(s=>s.median):it.S.map(s=>s.mean), hi=a[0]===a[1]?(mean(it.arrs[0])>=mean(it.arrs[1])?0:1):(a[0]>a[1]?0:1);
@@ -2055,8 +2183,8 @@ table1:{ g:'Reports', name:'Group comparison table', report:true,
       });
       if (wide && items.length>1 && items.every(it=>it.kind==='num')){ // one combined sentence, as in journal reports
         const np=items[0].np, lst=k=>items.map(it=>{ const S=it.S[k]; return !S.n?'—':np?`${nf(S.median)} (${nf(S.q1)}-${nf(S.q3)})`:`${nf(S.mean)} (±${nf(S.sd)})`; }).join(', ');
-        P.length=0; P.push(`The ${np?'median (IQR)':'mean (± SD)'} was ${andJ(lv.map((L,k)=>`${lst(k)} in ${L}`))} at ${andJ(items.map(it=>D.cols[it.j]))} respectively.`); }
-      if (wp) lv.forEach((L,k)=>{ if (Number.isFinite(wp[k])) sig.push(`Within ${L}, the values ${wp[k]<=0.05?'changed significantly':'did not change significantly'} across time points (P value ${pw(wp[k])}).`); });
+        P.length=0; P.push(`The ${np?'median (IQR)':'mean (± SD)'} was ${andJ(glv.map((L,k)=>`${lst(k)} in ${gname(k)}`))} at ${andJ(items.map(it=>D.cols[it.j]))} respectively.`); }
+      if (wp) glv.forEach((L,k)=>{ if (Number.isFinite(wp[k])) sig.push(`Within ${gname(k)}, the values ${wp[k]<=0.05?'changed significantly':'did not change significantly'} across time points (P value ${pw(wp[k])}).`); });
       if (ins.length) P.push(`${cap(andJ(ins))} ${ins.length>1?'were':'was'} insignificantly different between ${two?'both':'the'} groups.`);
       out+=P.map(t=>`<p class="para">${esc(t)}</p>`).join('')+sig.map(t=>`<p class="para">${esc(t)}</p>`).join('');
     }
@@ -2064,12 +2192,12 @@ table1:{ g:'Reports', name:'Group comparison table', report:true,
       let F='';
       if (wide){
         const nums=items.filter(it=>it.kind==='num');
-        if (nums.length) F+= nums[0].np ? boxGroupedSVG(nums.map(it=>D.cols[it.j]),lv,nums.map(it=>it.arrs),{title:o.title||'Comparison of the studied groups'})
-          : meansSVG(nums.map(it=>D.cols[it.j]),lv.map((L,k)=>({name:L,pts:nums.map(it=>meanCI(it.arrs[k]))})),{title:o.title||'Comparison of the studied groups'});
-      } else items.forEach(it=>{ const t=`${D.cols[it.j]} of the studied groups`;
-        if (it.kind==='cat') F+=clusteredBarSVG(it.L,lv,lv.map((_,k)=>it.L.map((_,i)=>it.tot[k]?100*it.O[i][k]/it.tot[k]:0)),{title:t});
-        else if (it.np) F+=boxSVG(lv.map((L,k)=>[L,it.arrs[k]]).filter(g=>g[1].length),{ylab:D.cols[it.j],title:t});
-        else F+=barMeansSVG(lv,it.S.map(s=>s.mean),it.S.map(s=>s.sd),{ylab:D.cols[it.j],title:t}); });
+        if (nums.length) F+= nums[0].np ? boxGroupedSVG(nums.map(it=>D.cols[it.j]),glv,nums.map(it=>it.arrs.slice(0,ngr)),{title:o.title||'Comparison of the studied groups'})
+          : meansSVG(nums.map(it=>D.cols[it.j]),glv.map((L,k)=>({name:L,pts:nums.map(it=>meanCI(it.arrs[k]))})),{title:o.title||'Comparison of the studied groups'});
+      } else items.forEach(it=>{ const t=noG?`${D.cols[it.j]} of the studied sample`:`${D.cols[it.j]} of the studied groups`;
+        if (it.kind==='cat') F+=clusteredBarSVG(it.L,glv,glv.map((_,k)=>it.L.map((_,i)=>it.tot[k]?100*it.O[i][k]/it.tot[k]:0)),{title:t});
+        else if (it.np) F+=boxSVG(glv.map((L,k)=>[L,it.arrs[k]]).filter(g=>g[1].length),{ylab:D.cols[it.j],title:t});
+        else F+=barMeansSVG(glv,it.S.slice(0,ngr).map(s=>s.mean),it.S.slice(0,ngr).map(s=>s.sd),{ylab:D.cols[it.j],title:t}); });
       out+=`<div class="plots">${F}</div>`;
     }
     return out;
@@ -2172,6 +2300,169 @@ consort:{ g:'Reports', name:'CONSORT flow diagram', noData:true, report:true,
     const txt=`In this study, ${assessed} patients were assessed for eligibility, ${ex.filter(e=>e[1]).map(e=>`${e[1]} ${e[0]==='Not meeting inclusion criteria'?'did not meet the criteria':e[0]==='Declined to participate'?'refused to participate in the study':'were excluded for other reasons'}`).join(' and ')||'none were excluded'}. The remaining ${rnd} patients were randomly allocated into two groups (${a1===a2?`${a1} patients in each`:`${a1} in ${g[0]} and ${a2} in ${g[1]}`}). ${lost[0]+lost[1]+disc[0]+disc[1]+exAn[0]+exAn[1]===0?'All allocated patients were followed-up and analyzed statistically.':`${an[0]} patients in ${g[0]} and ${an[1]} patients in ${g[1]} were analyzed statistically.`}`;
     return `<div class="noheading" hidden></div><p class="para">${esc(txt)}</p><div class="plots">${consortSVG({assessed,exReasons:ex,randomized:rnd,groups:g,alloc,notRec:[N(o.nr1),N(o.nr2)],lost,disc,exAn})}</div>`;
   }},
+missing:{ g:'Describe', name:'Missing data summary',
+  fields:[{k:'vars',t:'cols',label:'Variables (leave empty for all columns)'}],
+  run(o){
+    const vars=o.vars.length?o.vars:D.cols.map((_,j)=>j), rows=AR(), N=rows.length; need(N,'No rows.');
+    const miss=vars.map(j=>rows.filter(r=>isMiss(r[j])).length);
+    const pat=new Map(); rows.forEach(r=>{ const k=vars.map(j=>isMiss(r[j])?'·':'✓').join(''); pat.set(k,(pat.get(k)||0)+1); });
+    const complete=rows.filter(r=>vars.every(j=>!isMiss(r[j]))).length;
+    const top=[...pat].sort((a,b)=>b[1]-a[1]).slice(0,15);
+    return table(['Variable','Missing','% missing','Valid'],vars.map((j,k)=>[cname(j),miss[k],f(100*miss[k]/N,1),N-miss[k]]))
+      + table(['Rows','Complete rows (no missing)','% complete','Cells missing'],[[N,complete,f(100*complete/N,1),`${sum(miss)} of ${N*vars.length} (${f(100*sum(miss)/(N*vars.length),1)}%)`]])
+      + (vars.length<=20 ? h5('Most common missing-data patterns (✓ = observed, · = missing)')+table(['Pattern',...vars.map(cname),'Rows'],top.map(([k,c],i)=>[i+1,...k.split(''),c])) : '')
+      + `<div class="plots">${barChartSVG(vars.map(j=>D.cols[j]),[{name:'',vals:miss.map(m=>100*m/N)}],{ylab:'% missing',title:'Missing values by variable',values:true})}</div>`
+      + note('To fill in missing values, use Data → Missing… (mean, median, mode or a constant), or analyse complete cases.');
+  }},
+chart:{ g:'Graphs', name:'Chart builder',
+  fields:[{k:'type',t:'select',label:'Chart type',options:[['barmean','Bar chart of means (with error bars)'],['barpct','Bar chart of percentages'],['pie','Pie chart'],['line','Line chart of means over several variables (e.g. time points)'],['barcount','Bar chart of counts']]},
+    {k:'y',t:'num',label:'Value variable (bar of means)'},{k:'x',t:'col',label:'Category / x-axis variable',prefCat:true},{k:'g',t:'col',label:'Cluster by (optional; separate bars or lines)',optional:true},
+    {k:'vars',t:'nums',label:'Variables for the line chart (in order)'},
+    {k:'err',t:'select',label:'Error bars',options:[['sd','± 1 SD'],['se','± 1 SE'],['ci','95% CI'],['none','None']]},
+    {k:'title',t:'text',label:'Chart title (optional)'},{k:'xlab',t:'text',label:'X-axis label (optional)'},{k:'ylab',t:'text',label:'Y-axis label (optional)'},{k:'values',t:'check',label:'Show values on bars',def:true}],
+  run(o){
+    const E=(a)=>{ if (a.length<1) return [NaN,NaN]; const m=mean(a); if (o.err==='none'||a.length<2) return [NaN,NaN]; const s=sd(a), h=o.err==='sd'?s:o.err==='se'?s/Math.sqrt(a.length):tinv(0.975,a.length-1)*s/Math.sqrt(a.length); return [m-h,m+h]; };
+    const G=o.g>=0?strCol(o.g):null, gl=G?sortLevels([...new Set(G.filter(v=>v!=null))]):[null];
+    const errLab={sd:'mean ± SD',se:'mean ± SE',ci:'mean ± 95% CI',none:'mean'}[o.err];
+    if (o.type==='line'){
+      need(o.vars.length>=2,'Select at least 2 variables for the line chart.');
+      const C=o.vars.map(numCol);
+      const series=gl.map(L=>({name:L??'', pts:C.map(c=>{ const a=c.filter((v,i)=>Number.isFinite(v)&&(!G||G[i]===L)); if (!a.length) return null; const [lo,hi]=E(a); return {m:mean(a),lo,hi}; })}));
+      return `<div class="plots">${meansSVG(o.vars.map(j=>D.cols[j]),series,{title:o.title||`Means over ${o.vars.length} variables (${errLab})`,ylab:o.ylab||'',xlab:o.xlab||''})}</div>`;
+    }
+    const X=strCol(o.x), xl=sortLevels([...new Set(X.filter(v=>v!=null))]); need(xl.length>=1&&xl.length<=40,'The category variable needs 1–40 categories.');
+    if (o.type==='pie'){ const c=xl.map(L=>X.filter(v=>v===L).length); return `<div class="plots">${pieSVG(xl,c,{title:o.title||`${D.cols[o.x]}`})}</div>`; }
+    if (o.type==='barmean'){
+      const Y=numCol(o.y), series=gl.map(L=>{ const ar=xl.map(c=>Y.filter((v,i)=>Number.isFinite(v)&&X[i]===c&&(!G||G[i]===L))); const ee=ar.map(E);
+        return {name:L??'', vals:ar.map(a=>a.length?mean(a):NaN), lo:ee.map(e=>e[0]), hi:ee.map(e=>e[1]), n:ar.map(a=>a.length)}; });
+      const tb=table([cname(o.x),...(G?[cname(o.g)]:[]),'N','Mean',o.err==='none'?'':`${{sd:'SD range',se:'SE range',ci:'95% CI'}[o.err]}`],series.flatMap(s=>xl.map((c,i)=>[esc(c),...(G?[esc(s.name)]:[]),s.n[i],f(s.vals[i]),o.err==='none'?'':ci([s.lo[i],s.hi[i]])])));
+      return `<div class="plots">${barChartSVG(xl,series,{title:o.title||`${D.cols[o.y]} by ${D.cols[o.x]} (${errLab})`,ylab:o.ylab||D.cols[o.y],xlab:o.xlab||D.cols[o.x],values:o.values})}</div>`+tb;
+    }
+    const pct=o.type==='barpct', series=gl.map(L=>{ const inG=i=>!G||G[i]===L, tot=X.filter((v,i)=>v!=null&&inG(i)).length;
+      return {name:L??'', vals:xl.map(c=>{ const n=X.filter((v,i)=>v===c&&inG(i)).length; return pct?(tot?100*n/tot:0):n; })}; });
+    return `<div class="plots">${barChartSVG(xl,series,{title:o.title||`${D.cols[o.x]}${G?' by '+D.cols[o.g]:''}`,ylab:o.ylab||(pct?(G?`% within ${D.cols[o.g]}`:'Percentage (%)'):'Count'),xlab:o.xlab||D.cols[o.x],values:o.values})}</div>`;
+  }},
+risk:{ g:'Categorical', name:'Risk measures (RR, OR, NNT)',
+  fields:[{k:'x',t:'col',label:'Exposure / treatment variable',prefCat:true},{k:'xe',t:'level',of:'x',label:'Exposed / treated value'},{k:'y',t:'col',label:'Outcome variable',prefCat:true,nth:1},{k:'ye',t:'level',of:'y',label:'Outcome event value'}],
+  run(o){
+    need(o.x!==o.y,'Choose two different variables.');
+    const X=strCol(o.x), Y=strCol(o.y); let a=0,b=0,c=0,d=0;
+    X.forEach((v,i)=>{ if (v==null||Y[i]==null) return; const ex=v===o.xe, ev=Y[i]===o.ye; if (ex&&ev) a++; else if (ex) b++; else if (ev) c++; else d++; });
+    const n1=a+b, n0=c+d, N=n1+n0; need(n1>0&&n0>0,'Both exposed and unexposed groups need data.');
+    const z=1.959964, r1=a/n1, r0=c/n0, zc=(a===0||b===0||c===0||d===0)?0.5:0;
+    const rr=r1/r0, serr=Math.sqrt(1/(a+zc)-1/(n1+2*zc)+1/(c+zc)-1/(n0+2*zc)), rrE=((a+zc)/(n1+2*zc))/((c+zc)/(n0+2*zc));
+    const or=((a+zc)*(d+zc))/((b+zc)*(c+zc)), seor=Math.sqrt(1/(a+zc)+1/(b+zc)+1/(c+zc)+1/(d+zc));
+    const rd=r1-r0, serd=Math.sqrt(r1*(1-r1)/n1+r0*(1-r0)/n0), rdl=rd-z*serd, rdh=rd+z*serd;
+    const ct=catTest([[a,c],[b,d]]);
+    const nntTxt = rd===0 ? '∞' : `${f(1/Math.abs(rd),1)} (event ${rd>0?'more':'less'} frequent when exposed)`;
+    const nntCI = rdl*rdh>0 ? `[${f(1/Math.max(Math.abs(rdl),Math.abs(rdh)),1)}, ${f(1/Math.min(Math.abs(rdl),Math.abs(rdh)),1)}]` : 'not defined — the RD CI includes 0';
+    return table(['',`${esc(o.ye)}`,'Other','Total','Risk'],[[`<b>${esc(o.xe)}</b> (exposed)`,a,b,n1,f(r1,4)],['<b>Other</b> (unexposed)',c,d,n0,f(r0,4)],['<b>Total</b>',a+c,b+d,N,f((a+c)/N,4)]])
+      + table(['Measure','Estimate','95% CI'],[
+        ['Relative risk (RR)',`<b>${f(zc?rrE:rr,3)}</b>`,ci([Math.exp(Math.log(zc?rrE:rr)-z*serr),Math.exp(Math.log(zc?rrE:rr)+z*serr)])],
+        ['Odds ratio (OR)',`<b>${f(or,3)}</b>`,ci([Math.exp(Math.log(or)-z*seor),Math.exp(Math.log(or)+z*seor)])],
+        ['Risk difference (RD)',f(rd,4),ci([rdl,rdh])],
+        ['Relative risk reduction (1 − RR)',f(1-rr,3),''],
+        ['Number needed to treat / harm (1 / |RD|)',nntTxt,nntCI],
+        ['Attributable fraction in exposed ((RR − 1) / RR)',rr>1?f((rr-1)/rr,3):'—','']])
+      + table(['Test','p'],[[ct.test==='fisher'?"Fisher's exact test":'Pearson χ² test',P(ct.p)]])
+      + note(`Risk = proportion with "${esc(o.ye)}". CIs: log method for RR and OR, Wald for RD; NNT CI from the RD CI.${zc?' A 0.5 continuity correction was added because of a zero cell.':''}`)
+      + report(`RR = ${f(zc?rrE:rr,2)} (95% CI ${f(Math.exp(Math.log(zc?rrE:rr)-z*serr),2)}–${f(Math.exp(Math.log(zc?rrE:rr)+z*serr),2)}), RD = ${f(100*rd,1)}%, NNT = ${rd?f(1/Math.abs(rd),1):'∞'}`);
+  }},
+trend:{ g:'Categorical', name:'Cochran–Armitage trend test',
+  fields:[{k:'x',t:'col',label:'Ordered group variable (e.g. dose, stage, age group)'},{k:'y',t:'col',label:'Binary outcome variable',prefCat:true,nth:1},{k:'ev',t:'level',of:'y',label:'Outcome event value'}],
+  run(o){
+    const X=strCol(o.x), Y=strCol(o.y), lv=sortLevels([...new Set(X.filter((v,i)=>v!=null&&Y[i]!=null))]); need(lv.length>=3,'The ordered variable needs at least 3 levels.');
+    const sc=lv.every(v=>Number.isFinite(+v))?lv.map(Number):lv.map((_,i)=>i+1);
+    const n=lv.map(L=>X.filter((v,i)=>v===L&&Y[i]!=null).length), e=lv.map(L=>X.filter((v,i)=>v===L&&Y[i]===o.ev).length), N=sum(n), pb=sum(e)/N;
+    const T=sum(lv.map((_,i)=>sc[i]*(e[i]-n[i]*pb))), V=pb*(1-pb)*(sum(lv.map((_,i)=>n[i]*sc[i]**2))-sum(lv.map((_,i)=>n[i]*sc[i]))**2/N), Z=T/Math.sqrt(V), p=pZ(Z,'two');
+    return table([cname(o.x),'Score','N',`"${esc(o.ev)}"`,'%'],lv.map((L,i)=>[esc(L),sc[i],n[i],e[i],f(100*e[i]/n[i],1)]))
+      + table(['Z','p (two-sided)','Direction'],[[f(Z),P(p),Z>0?'increasing':'decreasing']])
+      + `<div class="plots">${barChartSVG(lv,[{name:'',vals:lv.map((_,i)=>100*e[i]/n[i])}],{ylab:`% ${o.ev}`,xlab:D.cols[o.x],title:`Proportion of ${o.ev} by ${D.cols[o.x]}`,values:true})}</div>`
+      + note(`Scores ${lv.every(v=>Number.isFinite(+v))?'are the numeric level values':'1, 2, 3… follow the sorted level order'}. Tests for a linear trend in proportions across ordered groups.`)
+      + report(`Cochran–Armitage Z = ${f(Z,2)}, p ${pAPA(p)}`);
+  }},
+cochranq:{ g:'Categorical', name:"Cochran's Q test (≥ 3 paired binary)",
+  fields:[{k:'vars',t:'cols',label:'Binary variables measured on the same subjects (≥ 3)'}],
+  run(o){
+    need(o.vars.length>=3,'Select at least 3 variables.');
+    const C=o.vars.map(strCol), L=sortLevels([...new Set(C.flat().filter(v=>v!=null))]); need(L.length===2,`All variables must use the same 2 values (found: ${L.slice(0,6).map(esc).join(', ')}).`);
+    const ev=L.find(v=>/^(yes|1|positive|true|present)$/i.test(v))||L[1];
+    const M=C[0].map((_,i)=>C.map(c=>c[i])).filter(r=>r.every(v=>v!=null)).map(r=>r.map(v=>v===ev?1:0)), n=M.length, k=o.vars.length; need(n>=2,'Need complete cases.');
+    const Cj=o.vars.map((_,j)=>sum(M.map(r=>r[j]))), Ri=M.map(sum), Nt=sum(Ri);
+    const den=k*Nt-sum(Ri.map(v=>v*v)), Q=den>0?(k-1)*(k*sum(Cj.map(v=>v*v))-Nt*Nt)/den:0, p=chiUpper(Q,k-1);
+    return table(['Variable',`n "${esc(ev)}"`,'%'],o.vars.map((j,c)=>[cname(j),Cj[c],f(100*Cj[c]/n,1)]))+table(['Q','df','p','N'],[[f(Q),k-1,P(p),n]])
+      + note(`Success = "${esc(ev)}". Tests whether the proportion of "${esc(ev)}" is the same across the related measurements (extension of McNemar's test).`)
+      + report(`Cochran's Q(${k-1}) = ${f(Q,2)}, p ${pAPA(p)}`);
+  }},
+roccomp:{ g:'Agreement & diagnostics', name:'ROC curves — compare markers',
+  fields:[{k:'vars',t:'nums',label:'Markers / scores to compare (1–6)'},{k:'s',t:'col',label:'True state variable',prefCat:true},{k:'pos',t:'level',of:'s',label:'Positive (diseased) state value'}],
+  run(o){
+    need(o.vars.length>=1&&o.vars.length<=6,'Select 1–6 markers.');
+    const S=strCol(o.s), C=o.vars.map(numCol), idx=S.map((_,i)=>i).filter(i=>S[i]!=null&&C.every(c=>Number.isFinite(c[i])));
+    const pos=idx.map(i=>S[i]===o.pos); need(pos.some(Boolean)&&pos.some(v=>!v),'Need both positive and negative cases.');
+    let sc=C.map(c=>idx.map(i=>c[i])), R=delongMulti(sc,pos); const flip=R.auc.map(a=>a<0.5);
+    if (flip.some(Boolean)){ sc=sc.map((s,k)=>flip[k]?s.map(v=>-v):s); R=delongMulti(sc,pos); }
+    const z=1.959964, k=o.vars.length;
+    const rows=o.vars.map((j,a)=>{ const se=Math.sqrt(R.S[a][a]); return [cname(j)+(flip[a]?' <span class="sub">(lower = positive)</span>':''),`<b>${f(R.auc[a])}</b>`,f(se),ci([Math.max(0,R.auc[a]-z*se),Math.min(1,R.auc[a]+z*se)]),P(pZ((R.auc[a]-0.5)/se,'two'))]; });
+    const pr=[]; for (let a=0;a<k;a++) for (let b=a+1;b<k;b++){ const v=R.S[a][a]+R.S[b][b]-2*R.S[a][b], d=R.auc[a]-R.auc[b], zz=d/Math.sqrt(v); pr.push([`${cname(o.vars[a])} vs ${cname(o.vars[b])}`,f(d),f(Math.sqrt(v)),ci([d-z*Math.sqrt(v),d+z*Math.sqrt(v)]),f(zz),P(pZ(zz,'two'))]); }
+    const Pl=makePlot({xmin:0,xmax:1,ymin:0,ymax:1,xlab:'1 − specificity',ylab:'Sensitivity',title:'ROC curves',legend:o.vars.map((j,a)=>`${D.cols[j]} (AUC ${f(R.auc[a],2)})`)});
+    let g=`<line class="ref" x1="${Pl.sx(0)}" y1="${Pl.sy(0)}" x2="${Pl.sx(1)}" y2="${Pl.sy(1)}"/>`;
+    sc.forEach((s,a)=>{ const m=pos.filter(Boolean).length, n=pos.length-m, cuts=[...new Set(s)].sort((x,y)=>y-x), pts=[[0,0]];
+      cuts.forEach(c=>{ let tp=0,fpn=0; s.forEach((v,i)=>{ if (v>=c){ pos[i]?tp++:fpn++; } }); pts.push([fpn/n,tp/m]); });
+      g+=`<path d="${pts.map((q,i)=>(i?'L':'M')+Pl.sx(q[0])+','+Pl.sy(q[1])).join('')}" style="stroke:${PAL[a%PAL.length]};stroke-width:2;fill:none"/>`; });
+    return table(['Marker','AUC','SE','95% CI','p (vs 0.5)'],rows)+(pr.length?h5('Pairwise comparison of AUCs (DeLong test)')+table(['Comparison','AUC difference','SE','95% CI','z','p'],pr):'')
+      + `<div class="plots">${Pl.wrap(g)}</div>`+note(`${R.m} positive and ${R.n} negative cases with complete data on all markers. DeLong's method accounts for markers being measured on the same patients.`);
+  }},
+regtable:{ g:'Reports', name:'Linear regression table', report:true,
+  fields:[{k:'y',t:'num',label:'Dependent (outcome) variable'},{k:'xs',t:'cols',label:'Predictors (text columns are dummy-coded)'},{k:'sel',t:'select',label:'Variable selection',options:[['enter','Enter — all predictors'],['forward','Forward (p < 0.05 to enter)'],['backward','Backward (p > 0.10 to remove)'],['stepwise','Stepwise']]},
+    {k:'title',t:'text',label:'Table title',def:'Multiple linear regression analysis'},{k:'text',t:'check',label:'Write results paragraph',def:true}],
+  run(o){
+    let xs=o.xs.filter(j=>j!==o.y); need(xs.length,'Select at least one predictor.');
+    const rows=AR(), Y=numCol(o.y); let steps=null;
+    if (o.sel!=='enter'){ const S=selectVars(xs,'lin',rows,i=>Number.isFinite(Y[i]),i=>Y[i],o.sel); steps=S.steps; need(S.sel.length,'No predictor met the selection criterion.'); xs=S.sel; }
+    const {idx,terms,cols,X}=buildDesign(rows,xs,i=>Number.isFinite(Y[i])), n=idx.length, p=terms.length; need(n>p,'Not enough complete cases.');
+    const y=idx.map(i=>Y[i]), M=ols(X,y); need(M,'Predictors are collinear.');
+    const dfe=n-p, mse=M.sse/dfe, tq=tinv(0.975,dfe), sy=sd(y), F=((M.sst-M.sse)/(p-1))/mse, pF=fUpper(F,p-1,dfe);
+    const pc=q=>q<=0.05?`<b>${q<0.001?'<0.001*':q.toFixed(3)+'*'}</b>`:q.toFixed(3), sig=[];
+    let T='<table class="rpt"><thead><tr><th>Variable</th><th>B</th><th>95% CI for B</th><th>SE</th><th>β</th><th>t</th><th>P value</th></tr></thead><tbody>';
+    M.b.forEach((b,k)=>{ const se=Math.sqrt(M.inv[k][k]*mse), t=b/se, q=pT(t,dfe,'two'), nm=terms[k].replace(/ \[(.*)\]$/,': $1');
+      if (k&&q<=0.05) sig.push(`${nm.replace(/<[^>]*>/g,'')} (B = ${f(b,2)}, 95% CI ${f(b-tq*se,2)} to ${f(b+tq*se,2)}, P ${q<0.001?'< 0.001':'= '+q.toFixed(3)})`);
+      T+=`<tr><th>${k?nm:'(Constant)'}</th><td>${f(b)}</td><td>${f(b-tq*se)} to ${f(b+tq*se)}</td><td>${f(se)}</td><td>${k?f(b*sd(cols[k-1])/sy):''}</td><td>${f(t)}</td><td>${pc(q)}</td></tr>`; });
+    T+='</tbody></table>';
+    let out=`<div class="noheading" hidden></div>`;
+    if (steps) out+=`<p class="note">Variable selection (${o.sel}): ${steps.length?steps.map(s=>`${s[0].toLowerCase()} ${s[1]} (p ${s[2]})`).join('; '):'no changes'}.</p>`;
+    out+=`<p class="caption">Table: ${esc(o.title)}</p>${T}<p class="note">Dependent variable: ${cname(o.y)}. B: unstandardized coefficient, β: standardized coefficient, CI: confidence interval. R² = ${f(M.r2)}, adjusted R² = ${f(1-(1-M.r2)*(n-1)/dfe)}, F(${p-1}, ${dfe}) = ${f(F,2)}, P ${pF<0.001?'< 0.001':'= '+pF.toFixed(3)}; n = ${n}. *: Significant as P value ≤ 0.05.</p>`;
+    if (o.text) out+=`<p class="para">${esc(`Multiple linear regression was performed to identify predictors of ${D.cols[o.y]}. The model was ${pF<=0.05?'statistically significant':'not statistically significant'} (F(${p-1}, ${dfe}) = ${f(F,2)}, P ${pF<0.001?'< 0.001':'= '+pF.toFixed(3)}) and explained ${f(100*M.r2,1)}% of the variance (R² = ${f(M.r2,3)}). `)}${esc(sig.length?`${sig.length>1?'Significant predictors were':'The significant predictor was'} ${sig.length<2?sig[0]:sig.slice(0,-1).join(', ')+' and '+sig[sig.length-1]}.`:'No individual predictor was statistically significant.')}</p>`;
+    return out;
+  }},
+metabin:{ g:'Meta-analysis', name:'Meta-analysis — binary outcome',
+  fields:[{k:'st',t:'col',label:'Study label'},{k:'e1',t:'num',label:'Events — treatment'},{k:'n1',t:'num',label:'Total — treatment',nth:1},{k:'e0',t:'num',label:'Events — control',nth:2},{k:'n0',t:'num',label:'Total — control',nth:3},
+    {k:'meas',t:'select',label:'Effect measure',options:[['or','Odds ratio'],['rr','Risk ratio']]},{k:'model',t:'select',label:'Forest plot weights',options:[['random','Random effects (DerSimonian–Laird)'],['fixed','Fixed effect (inverse variance)']]}],
+  run(o){
+    const L=strCol(o.st), E1=numCol(o.e1), N1=numCol(o.n1), E0=numCol(o.e0), N0=numCol(o.n0), st=[], drop=[];
+    L.forEach((nm,i)=>{ const e1=E1[i], n1=N1[i], e0=E0[i], n0=N0[i]; if (![e1,n1,e0,n0].every(Number.isFinite)) return;
+      if ((e1===0&&e0===0)||(e1===n1&&e0===n0)){ drop.push(nm); return; }
+      let a=e1,b=n1-e1,c=e0,d=n0-e0; const cc=(a===0||b===0||c===0||d===0)?0.5:0; a+=cc;b+=cc;c+=cc;d+=cc;
+      st.push(o.meas==='or'?{name:nm??`Study ${i+1}`, y:Math.log(a*d/(b*c)), se:Math.sqrt(1/a+1/b+1/c+1/d)}:{name:nm??`Study ${i+1}`, y:Math.log((a/(a+b))/(c/(c+d))), se:Math.sqrt(1/a-1/(a+b)+1/c-1/(c+d))}); });
+    return metaReport(st,{ratio:true,label:o.meas==='or'?'Odds ratio':'Risk ratio',random:o.model==='random',drop});
+  }},
+metacont:{ g:'Meta-analysis', name:'Meta-analysis — continuous outcome',
+  fields:[{k:'st',t:'col',label:'Study label'},{k:'m1',t:'num',label:'Mean — treatment'},{k:'s1',t:'num',label:'SD — treatment',nth:1},{k:'n1',t:'num',label:'N — treatment',nth:2},{k:'m0',t:'num',label:'Mean — control',nth:3},{k:'s0',t:'num',label:'SD — control',nth:4},{k:'n0',t:'num',label:'N — control',nth:5},
+    {k:'meas',t:'select',label:'Effect measure',options:[['md','Mean difference'],['smd',"Standardized mean difference (Hedges' g)"]]},{k:'model',t:'select',label:'Forest plot weights',options:[['random','Random effects (DerSimonian–Laird)'],['fixed','Fixed effect (inverse variance)']]}],
+  run(o){
+    const L=strCol(o.st), V=[o.m1,o.s1,o.n1,o.m0,o.s0,o.n0].map(numCol), st=[];
+    L.forEach((nm,i)=>{ const [m1,s1,n1,m0,s0,n0]=V.map(c=>c[i]); if (![m1,s1,n1,m0,s0,n0].every(Number.isFinite)||n1<2||n0<2) return;
+      if (o.meas==='md') st.push({name:nm??`Study ${i+1}`, y:m1-m0, se:Math.sqrt(s1*s1/n1+s0*s0/n0)});
+      else { const sp=Math.sqrt(((n1-1)*s1*s1+(n0-1)*s0*s0)/(n1+n0-2)), J=1-3/(4*(n1+n0)-9), g=J*(m1-m0)/sp; st.push({name:nm??`Study ${i+1}`, y:g, se:Math.sqrt((n1+n0)/(n1*n0)+g*g/(2*(n1+n0)))}); } });
+    return metaReport(st,{ratio:false,label:o.meas==='md'?'Mean difference':"Hedges' g",random:o.model==='random'});
+  }},
+metagen:{ g:'Meta-analysis', name:'Meta-analysis — generic (effect & SE)',
+  fields:[{k:'st',t:'col',label:'Study label'},{k:'y',t:'num',label:'Effect estimate'},{k:'se',t:'num',label:'Standard error',nth:1},{k:'scale',t:'select',label:'The estimates are',options:[['diff','Differences (null = 0)'],['log','Log ratios, e.g. log OR / log HR (null = 1 after back-transformation)']]},{k:'model',t:'select',label:'Forest plot weights',options:[['random','Random effects (DerSimonian–Laird)'],['fixed','Fixed effect (inverse variance)']]}],
+  run(o){
+    const L=strCol(o.st), Y=numCol(o.y), S=numCol(o.se), st=[];
+    L.forEach((nm,i)=>{ if (Number.isFinite(Y[i])&&S[i]>0) st.push({name:nm??`Study ${i+1}`, y:Y[i], se:S[i]}); });
+    return metaReport(st,{ratio:o.scale==='log',label:o.scale==='log'?'Ratio':'Effect',random:o.model==='random'});
+  }},
 };
 
 /* ================= Dialogs ================= */
@@ -2194,7 +2485,7 @@ function fieldHTML(fd){
   const pick=(list)=>{ let l=list; if (fd.prefCat){ const cats=list.filter(([j])=>!colIsNum(j)); if (cats.length) l=[...cats,...list.filter(([j])=>colIsNum(j))]; } return (l[fd.nth||0]||l[0]||[-1])[0]; };
   switch (fd.t){
     case 'num': return `<label class="f">${fd.label}<select name="${fd.k}">${opts(nums,pick(nums))}</select></label>`;
-    case 'col': return `<label class="f">${fd.label}<select name="${fd.k}">${fd.optional?'<option value="-1">— none —</option>':''}${opts(all,fd.optional?-2:pick(all))}</select></label>`;
+    case 'col': return `<label class="f">${fd.label}<select name="${fd.k}">${fd.optional?'<option value="-1">— none —</option>':''}${opts(all,fd.optional&&!fd.prefCat?-2:pick(all))}</select></label>`;
     case 'nums': case 'cols': { const list=fd.t==='nums'?nums:all;
       return `<fieldset><legend>${fd.label}</legend><div class="checks">${list.map(([j,c])=>`<label class="ck"><input type="checkbox" name="${fd.k}" value="${j}">${esc(c)}${fd.t==='cols'&&!colIsNum(j)?' <span class="badge t">abc</span>':''}</label>`).join('')||'<span class="hint">No suitable columns.</span>'}</div></fieldset>`; }
     case 'text': return `<label class="f">${fd.label}<input type="text" name="${fd.k}" value="${esc(fd.def??'')}" autocomplete="off"></label>`;
@@ -2256,6 +2547,28 @@ function openCompute(){
   });
 }
 const varHint = () => `Variables: ${exprIds().map(i=>`<code>${esc(i)}</code>`).join(', ')}. Functions: log, ln, log10, exp, sqrt, abs, round, floor, ceil, min, max, pow, isNA(x)…`;
+function openMissing(){
+  need2();
+  const miss=D.cols.map((_,j)=>D.rows.filter(r=>isMiss(r[j])).length);
+  openDialog('Handle missing values', `<fieldset><legend>Columns (missing count)</legend><div class="checks">${D.cols.map((c,j)=>`<label class="ck"><input type="checkbox" name="cols" value="${j}"${miss[j]?' checked':''}>${esc(c)} <span class="hint">(${miss[j]})</span></label>`).join('')}</div></fieldset>
+    <label class="f">Action<select name="m"><option value="mean">Replace with the column mean (numeric)</option><option value="median">Replace with the column median (numeric)</option><option value="mode">Replace with the most frequent value</option><option value="const">Replace with a constant value</option><option value="drop">Delete rows with a missing value in any selected column</option></select></label>
+    <label class="f">Constant value (for “constant”)<input name="v" value="0"></label>
+    <label class="ck"><input type="checkbox" name="newcol" checked>Write imputed values to new columns (keep the originals)</label>
+    <span class="hint">Simple imputation reduces variability and can bias results; report it in your methods, or prefer complete-case analysis when little data is missing.</span>`, 'Apply', ()=>{
+    const F=$('#dlgForm'), cols=[...F.querySelectorAll('input[name=cols]:checked')].map(e=>+e.value), m=F.elements.m.value; need(cols.length,'Select at least one column.');
+    snap();
+    if (m==='drop'){ const before=D.rows.length; D.rows=D.rows.filter(r=>cols.every(j=>!isMiss(r[j]))); dataChanged(true); alert(`${before-D.rows.length} rows deleted.`); return; }
+    for (const j of cols){
+      let fill;
+      if (m==='const') fill=F.elements.v.value;
+      else if (m==='mode'){ const c=new Map(); D.rows.forEach(r=>{ if (!isMiss(r[j])){ const v=String(r[j]).trim(); c.set(v,(c.get(v)||0)+1); } }); fill=[...c].sort((a,b)=>b[1]-a[1])[0]?.[0]??''; }
+      else { need(colIsNum(j),`"${D.cols[j]}" is not numeric — use mode or a constant.`); const a=D.rows.map(r=>toNum(r[j])).filter(Number.isFinite); fill=String(+(m==='mean'?mean(a):median(a)).toPrecision(10)); }
+      if (F.elements.newcol.checked){ D.cols.push(uniqueName(`${D.cols[j]}_imp`)); D.rows.forEach(r=>r.push(isMiss(r[j])?fill:r[j])); }
+      else D.rows.forEach(r=>{ if (isMiss(r[j])) r[j]=fill; });
+    }
+    dataChanged(true);
+  });
+}
 function openFilter(){
   need2();
   openDialog('Filter rows (select cases)', `<label class="f">Keep rows where<input name="ex" value="${esc(D.filter||'')}" placeholder="e.g. age >= 30 && sex == 'F'" autocomplete="off"></label>
@@ -2531,7 +2844,7 @@ document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>showTab(b.dat
 (function buildSide(){
   const groups=new Map();
   for (const [k,A] of Object.entries(AN)){ if (!groups.has(A.g)) groups.set(A.g,[]); groups.get(A.g).push(`<button data-an="${k}">${A.name}</button>`); }
-  const ORDER=['Reports','Describe','Graphs','Compare means','Nonparametric','Relationships','Categorical','Agreement & diagnostics','Survival','Multivariate','Planning'];
+  const ORDER=['Reports','Describe','Graphs','Compare means','Nonparametric','Relationships','Categorical','Agreement & diagnostics','Survival','Multivariate','Meta-analysis','Planning'];
   $('#side').innerHTML=[...groups].sort((a,b)=>(ORDER.indexOf(a[0])+99)%99-(ORDER.indexOf(b[0])+99)%99).map(([g,b])=>`<h4>${g}</h4>${b.join('')}`).join('');
   $('#side').addEventListener('click', e=>{ const b=e.target.closest('[data-an]'); if (b) openAnalysis(b.dataset.an); });
 })();
