@@ -95,6 +95,11 @@ table.data tr.off td:not(.rn){opacity:.35}
 .card>header button.copy{padding:2px 9px;font-size:12px}
 button:disabled{opacity:.45;cursor:default}
 button:disabled:hover{border-color:var(--border)}
+.pw{position:relative}
+.pw .dlbar{position:absolute;top:4px;right:4px;display:none;gap:4px}
+.pw:hover .dlbar{display:flex}
+@media (hover:none){.pw .dlbar{display:flex;opacity:.8}}
+.dlbar button{padding:2px 8px;font-size:11px}
 .sep{width:1px;align-self:stretch;background:var(--border);margin:0 2px}
 table.corr td{text-align:center;line-height:1.2}
 table.corr td small{display:block;color:var(--muted);font-size:10.5px}
@@ -143,7 +148,7 @@ textarea.paste{width:100%;min-height:200px;font-family:ui-monospace,monospace;fo
   .top{gap:8px;flex-wrap:wrap}
 }
 @media print{
-  .top,.side,.toolbar,#tab-data,.card .x,.card .copy{display:none!important}
+  .top,.side,.toolbar,#tab-data,.card .x,.card .copy,.dlbar{display:none!important}
   .app{display:block}
   #tab-results{display:block!important}
   .card{break-inside:avoid;box-shadow:none}
@@ -158,6 +163,9 @@ textarea.paste{width:100%;min-height:200px;font-family:ui-monospace,monospace;fo
     <button data-tab="results">Results <span class="count" id="rcount"></span></button>
   </nav>
   <div class="spacer"></div>
+  <button class="ghost" id="bSaveProj" title="Save data and results to a .statbench.json file">Save project</button>
+  <button class="ghost" id="bOpenProj" title="Open a saved project file">Open project</button>
+  <input type="file" id="projFile" accept=".json,application/json" hidden>
   <button class="ghost" id="themeBtn" title="Toggle theme">Theme: Auto</button>
 </header>
 
@@ -175,6 +183,7 @@ textarea.paste{width:100%;min-height:200px;font-family:ui-monospace,monospace;fo
         <button id="bAddCol">+ Column</button>
         <button id="bCompute">Compute…</button>
         <button id="bRecode">Recode…</button>
+        <button id="bTransform">Transform…</button>
         <button id="bSort">Sort…</button>
         <button id="bFilter">Filter…</button>
         <span class="sep"></span>
@@ -422,7 +431,8 @@ function summary(a){
     median:quant(s,.5), q1:quant(s,.25), q3:quant(s,.75), iqr:quant(s,.75)-quant(s,.25), g1, g2,
     skew: n>2 ? Math.sqrt(n*(n-1))/(n-2)*g1 : NaN,
     kurt: n>3 ? ((n+1)*g2+6)*(n-1)/((n-2)*(n-3)) : NaN,
-    seSkew, seKurt: n>3 ? 2*seSkew*Math.sqrt((n*n-1)/((n-3)*(n+5))) : NaN };
+    seSkew, seKurt: n>3 ? 2*seSkew*Math.sqrt((n*n-1)/((n-3)*(n+5))) : NaN,
+    p5:quant(s,.05), p95:quant(s,.95), cv:100*sdv/m, trim:(c=>mean(s.slice(c,n-c)))(Math.floor(0.05*n)) };
 }
 function rank(a){ // average ranks; returns {r, T} where T = Σ(t³ - t)
   const idx=a.map((v,i)=>i).sort((i,j)=>a[i]-a[j]), r=new Array(a.length); let T=0;
@@ -699,7 +709,7 @@ document.addEventListener('keydown', e=>{
   if ((e.ctrlKey||e.metaKey) && !e.shiftKey && e.key.toLowerCase()==='z' && !e.target.matches('input,textarea,select') && !dlg.open && !$('#tab-data').hidden){ e.preventDefault(); undo(); }
 });
 function download(name, text, type){
-  const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([text],{type})); a.download=name; a.click();
+  const a=document.createElement('a'); a.href=URL.createObjectURL(text instanceof Blob?text:new Blob([text],{type})); a.download=name; a.click();
   setTimeout(()=>URL.revokeObjectURL(a.href),1000);
 }
 
@@ -795,10 +805,11 @@ function boxSVG(groups, {ylab, title}={}){ // groups: [[label, array]]
   });
   return Pl.wrap(g);
 }
-function scatterSVG(x,y,{xlab,ylab,line,ref0,title,refLine,groups,lines}={}){
-  const glv = groups ? sortLevels([...new Set(groups)]) : null;
-  const Pl=makePlot({xmin:Math.min(...x),xmax:Math.max(...x),ymin:Math.min(...y,ref0?0:Infinity),ymax:Math.max(...y,ref0?0:-Infinity),xlab,ylab,title,legend:glv});
+function scatterSVG(x,y,{xlab,ylab,line,ref0,title,refLine,groups,lines,hlines}={}){
+  const glv = groups ? sortLevels([...new Set(groups)]) : null, hv=(hlines||[]).map(h=>h[0]);
+  const Pl=makePlot({xmin:Math.min(...x),xmax:Math.max(...x),ymin:Math.min(...y,...hv,ref0?0:Infinity),ymax:Math.max(...y,...hv,ref0?0:-Infinity),xlab,ylab,title,legend:glv});
   let g='';
+  (hlines||[]).forEach(([v,cls,lab])=>{ g+=`<line class="${cls}" x1="${Pl.m.l}" x2="${Pl.m.l+Pl.pw}" y1="${Pl.sy(v)}" y2="${Pl.sy(v)}"/>`+(lab?`<text x="${Pl.m.l+Pl.pw-4}" y="${Pl.sy(v)-5}" text-anchor="end">${esc(lab)} ${f(v,2)}</text>`:''); });
   if (ref0) g+=`<line class="ref" x1="${Pl.m.l}" x2="${Pl.m.l+Pl.pw}" y1="${Pl.sy(0)}" y2="${Pl.sy(0)}"/>`;
   x.forEach((v,i)=>{ const col = glv ? ` style="fill:${PAL[glv.indexOf(groups[i])%PAL.length]}"` : '';
     g+=`<circle class="pt"${col} cx="${Pl.sx(v).toFixed(1)}" cy="${Pl.sy(y[i]).toFixed(1)}" r="3.8"><title>${groups?esc(groups[i])+': ':''}(${f(v)}, ${f(y[i])})</title></circle>`; });
@@ -852,6 +863,86 @@ function twoGroups(o){
   return sp;
 }
 
+const fInv = (p,d1,d2) => bisect(x=>1-fUpper(x,d1,d2), p, 0, 1e5, 140);
+function cpCI(k,n,conf=0.95){ const a=1-conf; return [k===0?0:betaInv(a/2,k,n-k+1), k===n?1:betaInv(1-a/2,k+1,n-k)]; }
+function ksP(n1,n2,D){ // two-sided P(D_n1,n2 >= D)
+  if (n1*n2<=4e6){
+    const inside=(i,j)=>Math.abs(i/n1-j/n2)<D-1e-10, u=new Float64Array(n2+1); u[0]=1;
+    for (let j=1;j<=n2;j++) u[j]=inside(0,j)?u[j-1]:0;
+    for (let i=1;i<=n1;i++){ u[0]=inside(i,0)?u[0]:0; for (let j=1;j<=n2;j++) u[j]=inside(i,j)?(u[j]*i+u[j-1]*j)/(i+j):0; }
+    return Math.min(1,Math.max(0,1-u[n2]));
+  }
+  const ne=n1*n2/(n1+n2), l=(Math.sqrt(ne)+0.12+0.11/Math.sqrt(ne))*D; let s=0;
+  for (let k=1;k<=100;k++) s+=2*(k%2?1:-1)*Math.exp(-2*k*k*l*l);
+  return Math.min(1,Math.max(0,s));
+}
+function kmeans(X,k,restarts=50){
+  let seed=12345; const rnd=()=>{ seed=(seed*1664525+1013904223)%4294967296; return seed/4294967296; };
+  const n=X.length, d2=(a,b)=>{ let s=0; for (let i=0;i<a.length;i++) s+=(a[i]-b[i])**2; return s; };
+  let best=null;
+  for (let r=0;r<restarts;r++){
+    const C=[X[Math.floor(rnd()*n)].slice()];
+    while (C.length<k){ const dd=X.map(x=>Math.min(...C.map(c=>d2(x,c)))), tot=sum(dd); let u=rnd()*tot, i=0; while (i<n-1 && (u-=dd[i])>0) i++; C.push(X[i].slice()); }
+    let lab=new Array(n).fill(-1);
+    for (let it=0; it<300; it++){
+      let changed=false;
+      X.forEach((x,i)=>{ let bi=0, bd=Infinity; C.forEach((c,j)=>{ const v=d2(x,c); if (v<bd){bd=v;bi=j;} }); if (lab[i]!==bi){ lab[i]=bi; changed=true; } });
+      for (let j=0;j<k;j++){ const mem=X.filter((_,i)=>lab[i]===j);
+        if (mem.length) C[j]=mem[0].map((_,c)=>mean(mem.map(m=>m[c])));
+        else { let far=0, fd=-1; X.forEach((x,i)=>{ const v=d2(x,C[lab[i]]); if (v>fd){fd=v;far=i;} }); C[j]=X[far].slice(); lab[far]=j; changed=true; } }
+      if (!changed) break;
+    }
+    // Hartigan refinement: move single points while it lowers the total within-cluster SS
+    const cnt=new Array(k).fill(0); lab.forEach(l=>cnt[l]++);
+    for (let pass=0, moved=true; moved && pass<100; pass++){
+      moved=false;
+      X.forEach((x,i)=>{ const a=lab[i]; if (cnt[a]<=1) return;
+        const ca=cnt[a]/(cnt[a]-1)*d2(x,C[a]); let bb=-1, best=ca;
+        for (let j=0;j<k;j++) if (j!==a){ const v=cnt[j]/(cnt[j]+1)*d2(x,C[j]); if (v<best-1e-12){ best=v; bb=j; } }
+        if (bb<0) return;
+        C[a]=C[a].map((c,q)=>(c*cnt[a]-x[q])/(cnt[a]-1)); C[bb]=C[bb].map((c,q)=>(c*cnt[bb]+x[q])/(cnt[bb]+1));
+        cnt[a]--; cnt[bb]++; lab[i]=bb; moved=true; });
+    }
+    const inertia=sum(X.map((x,i)=>d2(x,C[lab[i]])));
+    if (!best || inertia<best.inertia) best={lab:lab.slice(), C:C.map(c=>c.slice()), inertia};
+  }
+  return best;
+}
+function kmFit(t,e){ // Kaplan–Meier with Greenwood SE and log-log CI
+  const idx=t.map((_,i)=>i).sort((a,b)=>t[a]-t[b]); let n=t.length, S=1, vs=0; const steps=[], cens=[];
+  for (let p=0;p<idx.length;){
+    const tm=t[idx[p]]; let d=0, c=0;
+    while (p<idx.length && t[idx[p]]===tm){ e[idx[p]]?d++:c++; p++; }
+    if (d){ S*=1-d/n; vs+= n>d ? d/(n*(n-d)) : Infinity;
+      let lo=NaN, hi=NaN; if (S>0&&S<1&&Number.isFinite(vs)){ const se=Math.sqrt(vs)/Math.abs(Math.log(S)); lo=S**Math.exp(1.959964*se); hi=S**Math.exp(-1.959964*se); }
+      steps.push({t:tm,n,d,c,S,se:S*Math.sqrt(vs),lo,hi}); }
+    if (c) cens.push({t:tm,S});
+    n-=d+c;
+  }
+  const first=fn=>{ const s=steps.find(fn); return s?s.t:NaN; };
+  return {steps, cens, median:first(s=>s.S<=0.5), medLo:first(s=>s.lo<=0.5), medHi:first(s=>s.hi<=0.5)};
+}
+function logrank(t,e,g,k){ // k-group log-rank; g = group index per obs
+  const idx=t.map((_,i)=>i).sort((a,b)=>t[a]-t[b]), nj=new Array(k).fill(0), O=new Array(k).fill(0), E=new Array(k).fill(0);
+  const V=Array.from({length:k},()=>new Array(k).fill(0)); g.forEach(v=>nj[v]++);
+  for (let p=0;p<idx.length;){
+    const tm=t[idx[p]], dj=new Array(k).fill(0), rm=new Array(k).fill(0);
+    while (p<idx.length && t[idx[p]]===tm){ const i=idx[p]; if (e[i]) dj[g[i]]++; rm[g[i]]++; p++; }
+    const d=sum(dj), n=sum(nj);
+    if (d){ for (let a=0;a<k;a++){ O[a]+=dj[a]; E[a]+=d*nj[a]/n;
+      if (n>1) for (let b=0;b<k;b++) V[a][b]+=d*(n-d)/(n-1)*nj[a]/n*((a===b?1:0)-nj[b]/n); } }
+    for (let a=0;a<k;a++) nj[a]-=rm[a];
+  }
+  const q=k-1, Vi=matInv(V.slice(0,q).map(r=>r.slice(0,q))), u=O.slice(0,q).map((o,a)=>o-E[a]);
+  const chi=Vi?sum(u.map((ua,a)=>ua*sum(u.map((ub,b)=>Vi[a][b]*ub)))):NaN;
+  return {O,E,chi,df:q,p:chiUpper(chi,q)};
+}
+function sanitizeHTML(html){
+  const doc=new DOMParser().parseFromString(`<div>${html}</div>`,'text/html');
+  doc.querySelectorAll('script,iframe,object,embed,link,meta,base,form,style,frame').forEach(n=>n.remove());
+  doc.querySelectorAll('*').forEach(el=>{ for (const a of [...el.attributes]){ if (/^on/i.test(a.name) || (/(href|src)$/i.test(a.name) && /^\s*(javascript|data:text)/i.test(a.value))) el.removeAttribute(a.name); } });
+  return doc.body.firstChild.innerHTML;
+}
 function buildDesign(rows, xs, ok){ // dummy-codes text predictors (first level = reference)
   const isN=xs.map(colIsNum), S=xs.map((j,k)=>rows.map(r=>isN[k]?toNum(r[j]):(isMiss(r[j])?null:String(r[j]).trim())));
   const idx=[]; rows.forEach((_,i)=>{ if (ok(i) && xs.every((j,k)=>isN[k]?Number.isFinite(S[k][i]):S[k][i]!=null)) idx.push(i); });
@@ -898,11 +989,12 @@ desc:{ g:'Describe', name:'Descriptive statistics',
       if (o.g>=0) for (const [lv,a] of splitBy(j,o.g)) cols.push({h:`${cname(j)}<div class="sub">${cname(o.g)} = ${esc(lv)}</div>`,a,miss:null});
       else { const all=numCol(j), a=all.filter(Number.isFinite); cols.push({h:cname(j),a,miss:all.length-a.length}); }
     }
-    const S=cols.map(c=>({...summary(c.a),miss:c.miss}));
+    const modeOf=a=>{ const m=new Map(); a.forEach(v=>m.set(v,(m.get(v)||0)+1)); const mx=Math.max(...m.values()); if (mx<2) return '—'; const ms=[...m].filter(e=>e[1]===mx).map(e=>e[0]).sort((x,y)=>x-y); return f(ms[0])+(ms.length>1?'<span class="sub"> (multiple)</span>':''); };
+    const S=cols.map(c=>({...summary(c.a),miss:c.miss,mode:modeOf(c.a)}));
     const R=[['N','n',0],['Missing','miss',0],['Mean','mean'],['95% CI lower','ciL'],['95% CI upper','ciU'],['Std. deviation','sd'],['Variance','var'],['Std. error of mean','se'],
-      ['Median','median'],['Minimum','min'],['Maximum','max'],['Range','range'],['25th percentile','q1'],['75th percentile','q3'],['IQR','iqr'],
+      ['5% trimmed mean','trim'],['Median','median'],['Mode','mode',-1],['Coefficient of variation (%)','cv',2],['Minimum','min'],['Maximum','max'],['Range','range'],['5th percentile','p5'],['25th percentile','q1'],['75th percentile','q3'],['95th percentile','p95'],['IQR','iqr'],
       ['Skewness','skew'],['SE of skewness','seSkew'],['Kurtosis (excess)','kurt'],['SE of kurtosis','seKurt'],['Sum','sum']];
-    return table(['',...cols.map(c=>c.h)], R.map(([lab,k,d])=>[lab,...S.map(s=>s[k]==null?'—':f(s[k],d??3))]));
+    return table(['',...cols.map(c=>c.h)], R.map(([lab,k,d])=>[lab,...S.map(s=>s[k]==null?'—':d===-1?s[k]:f(s[k],d??3))]));
   }},
 freq:{ g:'Describe', name:'Frequencies',
   fields:[{k:'x',t:'col',label:'Variable',prefCat:true},{k:'sort',t:'select',label:'Order',options:[['value','By value'],['count','By frequency']]},{k:'chart',t:'check',label:'Bar chart',def:true}],
@@ -1288,7 +1380,7 @@ mcnemar:{ g:'Categorical', name:'McNemar test (paired)',
       + note(`${m} discordant pairs (${B} changed ${esc(L[0])} → ${esc(L[1])}, ${C} changed ${esc(L[1])} → ${esc(L[0])}). Exact test recommended when discordant pairs < 25.`)
       + report(`McNemar χ²(1, N = ${N}) = ${f(x2c,2)}, p ${pAPA(chiUpper(x2c,1))}`);
   }},
-alpha:{ g:'Scales & factors', name:"Reliability (Cronbach's α)",
+alpha:{ g:'Multivariate', name:"Reliability (Cronbach's α)",
   fields:[{k:'vars',t:'nums',label:'Scale items (≥ 2)'}],
   run(o){
     need(o.vars.length>=2,'Select at least 2 items.');
@@ -1308,7 +1400,7 @@ alpha:{ g:'Scales & factors', name:"Reliability (Cronbach's α)",
     if (rows.some(r=>parseFloat(r[3])<0)) out+=warn('Some items correlate negatively with the rest of the scale — they may need reverse-scoring (use Compute, e.g. 6 - item).');
     return out+report(`Cronbach's α = ${f(al,2)} (${lab}), ${k} items, N = ${n}`);
   }},
-pca:{ g:'Scales & factors', name:'Principal component analysis',
+pca:{ g:'Multivariate', name:'Principal component analysis',
   fields:[{k:'vars',t:'nums',label:'Variables (≥ 3 recommended)'},{k:'ncomp',t:'number',label:'Components to extract',ph:'auto (eigenvalue > 1)'},{k:'rot',t:'select',label:'Rotation',options:[['varimax','Varimax'],['none','None (unrotated)']]},{k:'save',t:'check',label:'Save component scores as new columns'}],
   run(o){
     need(o.vars.length>=2,'Select at least 2 variables.');
@@ -1373,6 +1465,253 @@ power:{ g:'Planning', name:'Power & sample size', noData:true,
       + note(isR?'Uses the Fisher z approximation. Conventions: r = 0.1 small, 0.3 medium, 0.5 large.':"Exact power from the noncentral t distribution. Conventions: d = 0.2 small, 0.5 medium, 0.8 large.")
       + `<div class="plots">${lineSVG(ns,[ns.map(pow)],{xlab:lab,ylab:'Power',title:'Power curve',hline:o.solve==='n'?o.pw:null,ymin:0,ymax:1,points:false})}</div>`
       + report(o.solve==='n'?`To detect ${isR?'r':'d'} = ${f(es,2)} with ${Math.round(o.pw*100)}% power at α = ${a} (${tails===2?'two':'one'}-sided), you need ${lab} = ${n}${o.test==='t2'?` (total ${tot})`:''}.`:`With ${lab} = ${n}, power = ${f(pw,3)}.`);
+  }},
+outliers:{ g:'Describe', name:'Outlier detection',
+  fields:[{k:'x',t:'num',label:'Variable'},{k:'alpha',t:'number',label:"Grubbs' test significance level",def:0.05}],
+  run(o){
+    const rows=AR(), all=numCol(o.x), idx=all.map((_,i)=>i).filter(i=>Number.isFinite(all[i])), a=idx.map(i=>all[i]), n=a.length;
+    need(n>=3,'Need at least 3 values.');
+    const s=summary(a), fl=new Map(), add=(i,m)=>{ if (!fl.has(i)) fl.set(i,[]); fl.get(i).push(m); };
+    const f15=[s.q1-1.5*s.iqr,s.q3+1.5*s.iqr], f3=[s.q1-3*s.iqr,s.q3+3*s.iqr];
+    idx.forEach((i,r)=>{ const v=a[r], z=(v-s.mean)/s.sd;
+      if (v<f3[0]||v>f3[1]) add(i,'IQR × 3 (extreme)'); else if (v<f15[0]||v>f15[1]) add(i,'IQR × 1.5');
+      if (Math.abs(z)>3) add(i,'|z| > 3'); });
+    const al=o.alpha||0.05, gr=[]; let rest=idx.slice();
+    while (rest.length>=3){
+      const v=rest.map(i=>all[i]), m=mean(v), sv=sd(v), N=v.length; if (!(sv>0)) break;
+      let bi=0; v.forEach((x,i)=>{ if (Math.abs(x-m)>Math.abs(v[bi]-m)) bi=i; });
+      const G=Math.abs(v[bi]-m)/sv, tc=tinv(1-al/(2*N),N-2), Gc=(N-1)/Math.sqrt(N)*Math.sqrt(tc*tc/(N-2+tc*tc));
+      const t2=N*(N-2)*G*G/((N-1)**2-N*G*G), p=t2>0?Math.min(1,2*N*(1-tcdf(Math.sqrt(t2),N-2))):0;
+      gr.push([gr.length+1,N,f(v[bi]),f(G),f(Gc),P(p)]);
+      if (G<=Gc) break; add(rest[bi],"Grubbs"); rest.splice(bi,1);
+    }
+    const list=[...fl].sort((x,y)=>all[x[0]]-all[y[0]]).map(([i,m])=>[D.rows.indexOf(rows[i])+1,f(all[i]),f((all[i]-s.mean)/s.sd),m.join(', ')]);
+    return table(['Method','Lower limit','Upper limit','Flagged'],[
+        ['Tukey fences (1.5 × IQR)',f(f15[0]),f(f15[1]),a.filter(v=>v<f15[0]||v>f15[1]).length],
+        ['Extreme (3 × IQR)',f(f3[0]),f(f3[1]),a.filter(v=>v<f3[0]||v>f3[1]).length],
+        ['z-score (|z| > 3)',f(s.mean-3*s.sd),f(s.mean+3*s.sd),a.filter(v=>Math.abs(v-s.mean)>3*s.sd).length]])
+      + h5(`Grubbs' test (iterative, two-sided, α = ${al})`)+table(['Step','N','Most extreme value','G','G critical','p'],gr)
+      + (list.length ? h5('Flagged observations')+table(['Row #','Value','z','Flagged by'],list.slice(0,300)) : note('No observations were flagged.'))
+      + `<div class="plots">${boxSVG([[D.cols[o.x],a]],{})}</div>`
+      + note("Grubbs' test assumes the remaining data are approximately normal. Flagged values should be checked, not automatically removed.");
+  }},
+glm:{ g:'Compare means', name:'ANCOVA / general linear model',
+  fields:[{k:'y',t:'num',label:'Dependent variable'},{k:'facs',t:'cols',label:'Fixed factors (treated as categorical)'},{k:'covs',t:'nums',label:'Covariates (numeric)'},{k:'inter',t:'check',label:'Include all factor interactions (full factorial)',def:true},{k:'emm',t:'check',label:'Estimated marginal means with Bonferroni pairwise comparisons',def:true}],
+  run(o){
+    const facs=o.facs.filter(j=>j!==o.y), covs=o.covs.filter(j=>j!==o.y&&!facs.includes(j));
+    need(facs.length||covs.length,'Select at least one factor or covariate.'); need(facs.length<=4,'At most 4 factors.');
+    const Y=numCol(o.y), Fv=facs.map(strCol), Cv=covs.map(numCol);
+    const idx=Y.map((_,i)=>i).filter(i=>Number.isFinite(Y[i])&&Fv.every(c=>c[i]!=null)&&Cv.every(c=>Number.isFinite(c[i])));
+    const y=idx.map(i=>Y[i]), n=y.length, lv=Fv.map(c=>sortLevels([...new Set(idx.map(i=>c[i]))]));
+    lv.forEach((l,k)=>need(l.length>=2,`Factor "${D.cols[facs[k]]}" needs at least 2 levels.`));
+    const code=(k,L)=>lv[k].slice(0,-1).map(Lc=>L===Lc?1:L===lv[k][lv[k].length-1]?-1:0);
+    const fcodes=Fv.map((c,k)=>idx.map(i=>code(k,c[i])));
+    const subsets=[]; for (let m=1;m<(1<<facs.length);m++){ const s=facs.map((_,k)=>k).filter(k=>m&(1<<k)); if (o.inter||s.length===1) subsets.push(s); }
+    subsets.sort((a,b)=>a.length-b.length);
+    const combos=s=>s.reduce((acc,k)=>acc.flatMap(c=>[...Array(lv[k].length-1).keys()].map(q=>[...c,[k,q]])),[[]]);
+    const terms=subsets.map(s=>({label:s.map(k=>cname(facs[k])).join(' × '), s, cols:combos(s).map(cb=>idx.map((_,r)=>cb.reduce((p,[k,q])=>p*fcodes[k][r][q],1)))}));
+    covs.forEach((j,c)=>terms.push({label:cname(j), cov:c, cols:[idx.map(i=>Cv[c][i])]}));
+    const fit=skip=>{ const cols=terms.filter(t=>t!==skip).flatMap(t=>t.cols); return ols(y.map((_,r)=>[1,...cols.map(c=>c[r])]),y); };
+    const full=fit(null); need(full,'The design is singular — some factor combinations are probably empty. Try without interactions.');
+    const p=1+terms.reduce((s,t)=>s+t.cols.length,0), dfe=n-p; need(dfe>0,'Not enough observations for this model.');
+    const mse=full.sse/dfe, rep=[];
+    const rows=terms.map(t=>{ const m=fit(t), ss=m?m.sse-full.sse:NaN, df=t.cols.length, F=(ss/df)/mse, pv=fUpper(F,df,dfe);
+      rep.push(`${t.label}: F(${df}, ${dfe}) = ${f(F,2)}, p ${pAPA(pv)}`); return [t.label,f(ss),df,f(ss/df),f(F),P(pv),f(ss/(ss+full.sse))]; });
+    rows.push(['Residuals',f(full.sse),dfe,f(mse),'','',''],['Total (corrected)',f(full.sst),n-1,'','','','']);
+    let out=table(['N','R²','Adjusted R²','Residual SE'],[[n,f(full.r2),f(1-(1-full.r2)*(n-1)/dfe),f(Math.sqrt(mse))]])
+      + h5('Tests of between-subjects effects (Type III SS)')+table(['Source','Sum of squares','df','Mean square','F','p','Partial η²'],rows);
+    let off=1; const pos=new Map(); terms.forEach(t=>{ pos.set(t,off); off+=t.cols.length; });
+    if (covs.length) out+=h5('Covariate slopes')+table(['Covariate','B','SE','t','p'],terms.filter(t=>t.cov!=null).map(t=>{ const q=pos.get(t), b=full.b[q], se=Math.sqrt(full.inv[q][q]*mse); return [t.label,f(b),f(se),f(b/se),P(pT(b/se,dfe,'two'))]; }));
+    let plot='';
+    if (o.emm && facs.length){
+      const cm=covs.map((_,c)=>mean(idx.map(i=>Cv[c][i]))), tq=tinv(0.975,dfe);
+      const xrow=(k,L)=>{ const x=new Array(p).fill(0); x[0]=1; const cd=code(k,L);
+        terms.forEach(t=>{ const q=pos.get(t); if (t.cov!=null) x[q]=cm[t.cov]; else if (t.s.length===1&&t.s[0]===k) cd.forEach((v,c)=>{ x[q+c]=v; }); }); return x; };
+      const qf=(a,b)=>sum(a.map((v,i)=>v*sum(b.map((w,j)=>full.inv[i][j]*w))));
+      facs.forEach((j,k)=>{
+        const X=lv[k].map(L=>xrow(k,L)), em=X.map(x=>sum(x.map((v,i)=>v*full.b[i]))), se=X.map(x=>Math.sqrt(qf(x,x)*mse));
+        out+=h5(`Estimated marginal means: ${cname(j)}`)+table(['Level','EMM','SE','95% CI'],lv[k].map((L,i)=>[esc(L),f(em[i]),f(se[i]),ci([em[i]-tq*se[i],em[i]+tq*se[i]])]));
+        if (lv[k].length>2){ const pr=[], m=lv[k].length*(lv[k].length-1)/2;
+          for (let a=0;a<lv[k].length;a++) for (let b=a+1;b<lv[k].length;b++){ const dx=X[a].map((v,i)=>v-X[b][i]), s=Math.sqrt(qf(dx,dx)*mse), dd=em[a]-em[b], t=dd/s;
+            pr.push([`${esc(lv[k][a])} − ${esc(lv[k][b])}`,f(dd),f(s),f(t),P(Math.min(1,m*pT(t,dfe,'two')))]); }
+          out+=table(['Comparison','Difference','SE','t','p (Bonferroni)'],pr); }
+        if (k===0) plot=meansSVG(lv[k],[{name:'',pts:em.map((m,i)=>({m,lo:m-tq*se[i],hi:m+tq*se[i]}))}],{ylab:D.cols[o.y],xlab:D.cols[j],title:'Estimated marginal means ± 95% CI'});
+      });
+      if (covs.length) out+=note(`Marginal means are adjusted to covariate means: ${covs.map((j,c)=>`${cname(j)} = ${f(cm[c])}`).join(', ')}.`);
+    }
+    return out+(plot?`<div class="plots">${plot}</div>`:'')+note(`Type III sums of squares with sum-to-zero coding. ${AR().length-n} rows excluded for missing values. Factor × covariate interactions are not modelled (homogeneity of slopes assumed).`)+report(rep.join('; '));
+  }},
+ks:{ g:'Nonparametric', name:'Kolmogorov–Smirnov 2-sample test',
+  fields:[{k:'y',t:'num',label:'Variable'},{k:'g',t:'col',label:'Grouping variable (2 levels)',prefCat:true}],
+  run(o){
+    const sp=twoGroups(o), [[l1,a],[l2,b]]=sp, sa=a.slice().sort((x,y)=>x-y), sb=b.slice().sort((x,y)=>x-y), n1=a.length, n2=b.length;
+    const xs=[...new Set([...sa,...sb])].sort((x,y)=>x-y); let i=0,j=0,Dm=0; const e1=[], e2=[];
+    for (const x of xs){ while (i<n1&&sa[i]<=x) i++; while (j<n2&&sb[j]<=x) j++; e1.push(i/n1); e2.push(j/n2); Dm=Math.max(Dm,Math.abs(i/n1-j/n2)); }
+    const p=ksP(n1,n2,Dm);
+    const Pl=makePlot({xmin:xs[0],xmax:xs[xs.length-1],ymin:0,ymax:1,xlab:D.cols[o.y],ylab:'Cumulative proportion',title:'Empirical CDFs',legend:[l1,l2]});
+    const step=e=>{ let d=`M${Pl.sx(Pl.X.lo)},${Pl.sy(0)}`; xs.forEach((x,k)=>{ d+=`H${Pl.sx(x)}V${Pl.sy(e[k])}`; }); return d+`H${Pl.sx(Pl.X.hi)}`; };
+    return grpStats(sp)+table(['D','p','Method'],[[f(Dm,4),P(p),n1*n2<=4e6?'exact':'asymptotic']])
+      + `<div class="plots">${Pl.wrap(`<path d="${step(e1)}" style="stroke:${PAL[0]};stroke-width:2;fill:none"/><path d="${step(e2)}" style="stroke:${PAL[1]};stroke-width:2;fill:none"/>`)}</div>`
+      + note('Tests whether the two samples come from the same distribution (any difference in location, spread or shape).')
+      + report(`D = ${f(Dm,3)}, p ${pAPA(p)}`);
+  }},
+pcorr:{ g:'Relationships', name:'Partial correlation',
+  fields:[{k:'x',t:'num',label:'Variable X'},{k:'y',t:'num',label:'Variable Y',nth:1},{k:'z',t:'nums',label:'Control variables'}],
+  run(o){
+    const zs=o.z.filter(j=>j!==o.x&&j!==o.y); need(zs.length,'Select at least one control variable.'); need(o.x!==o.y,'Choose two different variables.');
+    const X=numCol(o.x), Y=numCol(o.y), Z=zs.map(numCol), idx=X.map((_,i)=>i).filter(i=>Number.isFinite(X[i])&&Number.isFinite(Y[i])&&Z.every(c=>Number.isFinite(c[i])));
+    const n=idx.length, k=zs.length, df=n-2-k; need(df>0,'Not enough complete cases.');
+    const Zm=idx.map(i=>[1,...Z.map(c=>c[i])]), x=idx.map(i=>X[i]), y=idx.map(i=>Y[i]);
+    const mx=ols(Zm,x), my=ols(Zm,y); need(mx&&my,'Control variables are collinear.');
+    const r=pearson(mx.res,my.res), t=r*Math.sqrt(df/(1-r*r)), p=pT(t,df,'two'), r0=pearson(x,y), t0=r0*Math.sqrt((n-2)/(1-r0*r0));
+    return table(['','r','t','df','p'],[['Zero-order correlation',f(r0),f(t0),n-2,P(pT(t0,n-2,'two'))],[`Partial (controlling for ${zs.map(cname).join(', ')})`,`<b>${f(r)}</b>`,f(t),df,P(p)]])
+      + note(`${cname(o.x)} with ${cname(o.y)}; n = ${n} complete cases.`)
+      + `<div class="plots">${scatterSVG(mx.res,my.res,{xlab:`${D.cols[o.x]} (residual)`,ylab:`${D.cols[o.y]} (residual)`,line:[0,r*sd(my.res)/sd(mx.res)],title:'Partial regression plot'})}</div>`
+      + report(`r<sub>partial</sub>(${df}) = ${f(r,2)}, p ${pAPA(p)}`);
+  }},
+roc:{ g:'Agreement & diagnostics', name:'ROC curve analysis',
+  fields:[{k:'x',t:'num',label:'Test score / predictor'},{k:'s',t:'col',label:'True state variable',prefCat:true},{k:'pos',t:'level',of:'s',label:'Positive (diseased) state value'},{k:'dir',t:'select',label:'Direction',options:[['higher','Higher score = more likely positive'],['lower','Lower score = more likely positive']]}],
+  run(o){
+    const X=numCol(o.x), S=strCol(o.s), idx=X.map((_,i)=>i).filter(i=>Number.isFinite(X[i])&&S[i]!=null);
+    const sg=o.dir==='lower'?-1:1, P1=idx.filter(i=>S[i]===o.pos).map(i=>sg*X[i]), N0=idx.filter(i=>S[i]!==o.pos).map(i=>sg*X[i]), m=P1.length, nn=N0.length;
+    need(m>=2&&nn>=2,'Need at least 2 positive and 2 negative cases.');
+    const rc=rank([...P1,...N0]).r, rp=rank(P1).r, rn=rank(N0).r;
+    const V10=P1.map((_,i)=>(rc[i]-rp[i])/nn), V01=N0.map((_,j)=>1-(rc[m+j]-rn[j])/m), auc=mean(V10);
+    const se=Math.sqrt(variance(V10)/m+variance(V01)/nn), z=(auc-0.5)/se, lo=Math.max(0,auc-1.959964*se), hi=Math.min(1,auc+1.959964*se);
+    const cuts=[...new Set([...P1,...N0])].sort((a,b)=>b-a), pts=[[0,0]]; let best={J:-1};
+    const all=cuts.map(c=>{ const se_=P1.filter(v=>v>=c).length/m, sp_=N0.filter(v=>v<c).length/nn; pts.push([1-sp_,se_]); if (se_+sp_-1>best.J) best={J:se_+sp_-1,c,se:se_,sp:sp_}; return {c,se:se_,sp:sp_}; });
+    const show=all.length<=25?all:[...Array(21).keys()].map(q=>all[Math.round(q*(all.length-1)/20)]);
+    const fmtc=c=>`${o.dir==='lower'?'≤':'≥'} ${f(sg*c)}`;
+    const Pl=makePlot({xmin:0,xmax:1,ymin:0,ymax:1,xlab:'1 − specificity',ylab:'Sensitivity',title:`ROC curve (AUC = ${f(auc)})`});
+    const svg=Pl.wrap(`<line class="ref" x1="${Pl.sx(0)}" y1="${Pl.sy(0)}" x2="${Pl.sx(1)}" y2="${Pl.sy(1)}"/><path class="line" style="stroke:${PAL[0]}" d="${pts.map((q,i)=>(i?'L':'M')+Pl.sx(q[0])+','+Pl.sy(q[1])).join('')}"/><circle cx="${Pl.sx(1-best.sp)}" cy="${Pl.sy(best.se)}" r="5.5" style="fill:${PAL[1]}"><title>Optimal cutoff ${fmtc(best.c)}</title></circle>`);
+    return table(['AUC','SE (DeLong)','95% CI','z (vs 0.5)','p','Positives','Negatives'],[[`<b>${f(auc)}</b>`,f(se),ci([lo,hi]),f(z),P(pZ(z,'two')),m,nn]])
+      + h5("Optimal cutoff (maximum Youden's J)")+table(['Positive if score','Sensitivity','Specificity','Youden J'],[[fmtc(best.c),f(best.se),f(best.sp),f(best.J)]])
+      + h5('Coordinates of the curve')+table(['Positive if score','Sensitivity','Specificity'],show.map(r=>[fmtc(r.c),f(r.se),f(r.sp)]))
+      + `<div class="plots">${svg}</div>`
+      + note(`Positive state = "${esc(o.pos)}". AUC 0.5 = no discrimination; ≥ .7 acceptable, ≥ .8 excellent, ≥ .9 outstanding.`)
+      + report(`AUC = ${f(auc,2)}, 95% CI [${f(lo,2)}, ${f(hi,2)}], p ${pAPA(pZ(z,'two'))}`);
+  }},
+diag:{ g:'Agreement & diagnostics', name:'Diagnostic test accuracy',
+  fields:[{k:'t',t:'col',label:'Test result variable',prefCat:true},{k:'tp',t:'level',of:'t',label:'Test-positive value'},{k:'r',t:'col',label:'Reference standard (truth) variable',prefCat:true,nth:1},{k:'rp',t:'level',of:'r',label:'Truly positive value'}],
+  run(o){
+    need(o.t!==o.r,'Choose two different variables.');
+    const T=strCol(o.t), R=strCol(o.r); let a=0,b=0,c=0,d=0;
+    T.forEach((v,i)=>{ if (v==null||R[i]==null) return; const tp=v===o.tp, rp=R[i]===o.rp; if (tp&&rp) a++; else if (tp) b++; else if (rp) c++; else d++; });
+    const n=a+b+c+d; need(a+c>0&&b+d>0,'The reference variable needs both positive and negative cases.');
+    const pr=(k,m,lab)=>{ const q=cpCI(k,m); return [lab,m?f(k/m,3):'—',m?`[${f(q[0],3)}, ${f(q[1],3)}]`:'—',`${k}/${m}`]; };
+    const sens=a/(a+c), spec=d/(b+d), z=1.959964;
+    const lr=(est,se)=>Number.isFinite(est)&&est>0&&Number.isFinite(se)?`[${f(Math.exp(Math.log(est)-z*se),2)}, ${f(Math.exp(Math.log(est)+z*se),2)}]`:'—';
+    const lrp=sens/(1-spec), lrn=(1-sens)/spec, dor=(a*d)/(b*c);
+    return table(['',`Truth: ${esc(o.rp)}`,'Truth: other','Total'],[[`<b>Test: ${esc(o.tp)}</b>`,a,b,a+b],['<b>Test: other</b>',c,d,c+d],['<b>Total</b>',a+c,b+d,n]])
+      + table(['Measure','Estimate','95% CI (exact)','Count'],[pr(a,a+c,'Sensitivity'),pr(d,b+d,'Specificity'),pr(a,a+b,'Positive predictive value'),pr(d,c+d,'Negative predictive value'),pr(a+d,n,'Accuracy'),pr(a+c,n,'Prevalence')])
+      + table(['Ratio','Estimate','95% CI'],[['Positive likelihood ratio (LR+)',f(lrp,2),lr(lrp,Math.sqrt(1/a-1/(a+c)+1/b-1/(b+d)))],['Negative likelihood ratio (LR−)',f(lrn,2),lr(lrn,Math.sqrt(1/c-1/(a+c)+1/d-1/(b+d)))],['Diagnostic odds ratio',f(dor,2),lr(dor,Math.sqrt(1/a+1/b+1/c+1/d))]])
+      + note("Predictive values depend on the prevalence in this sample. Confidence intervals: Clopper–Pearson for proportions, log method for ratios.")
+      + report(`Sensitivity = ${f(100*sens,1)}%, specificity = ${f(100*spec,1)}%, LR+ = ${f(lrp,2)}, LR− = ${f(lrn,2)}`);
+  }},
+kappa:{ g:'Agreement & diagnostics', name:"Cohen's kappa (agreement)",
+  fields:[{k:'x',t:'col',label:'Rater 1',prefCat:true},{k:'y',t:'col',label:'Rater 2',prefCat:true,nth:1},{k:'w',t:'select',label:'Weights',options:[['none','Unweighted (nominal categories)'],['linear','Linear weights (ordinal)'],['quadratic','Quadratic weights (ordinal)']]}],
+  run(o){
+    need(o.x!==o.y,'Choose two different raters.');
+    const a=strCol(o.x), b=strCol(o.y), ok=a.map((v,i)=>v!=null&&b[i]!=null);
+    const L=sortLevels([...new Set([...a.filter((_,i)=>ok[i]),...b.filter((_,i)=>ok[i])])]), k=L.length; need(k>=2,'Need at least 2 categories.'); need(k<=30,'Too many categories (max 30).');
+    const O=L.map(()=>L.map(()=>0)); let n=0; a.forEach((v,i)=>{ if (ok[i]){ O[L.indexOf(v)][L.indexOf(b[i])]++; n++; } });
+    const W=L.map((_,i)=>L.map((_,j)=>o.w==='linear'?1-Math.abs(i-j)/(k-1):o.w==='quadratic'?1-((i-j)/(k-1))**2:(i===j?1:0)));
+    const p=O.map(r=>r.map(v=>v/n)), pr=p.map(sum), pc=L.map((_,j)=>sum(p.map(r=>r[j])));
+    let po=0,pe=0; for (let i=0;i<k;i++) for (let j=0;j<k;j++){ po+=W[i][j]*p[i][j]; pe+=W[i][j]*pr[i]*pc[j]; }
+    const kap=(po-pe)/(1-pe), wr=L.map((_,i)=>sum(L.map((_,j)=>pc[j]*W[i][j]))), wc=L.map((_,j)=>sum(L.map((_,i)=>pr[i]*W[i][j])));
+    let s1=0,s0=0; for (let i=0;i<k;i++) for (let j=0;j<k;j++){ s1+=p[i][j]*(W[i][j]-(wr[i]+wc[j])*(1-kap))**2; s0+=pr[i]*pc[j]*(W[i][j]-(wr[i]+wc[j]))**2; }
+    const se=Math.sqrt(Math.max(0,s1-(kap-pe*(1-kap))**2)/(n*(1-pe)**2)), se0=Math.sqrt(Math.max(0,s0-pe*pe)/(n*(1-pe)**2)), z=kap/se0;
+    const lab=kap<0?'poor':kap<=0.2?'slight':kap<=0.4?'fair':kap<=0.6?'moderate':kap<=0.8?'substantial':'almost perfect';
+    return table([`${cname(o.x)} \\ ${cname(o.y)}`,...L.map(esc),'Total'],[...O.map((r,i)=>[`<b>${esc(L[i])}</b>`,...r.map((v,j)=>i===j?`<b>${v}</b>`:v),sum(r)]),['<b>Total</b>',...L.map((_,j)=>sum(O.map(r=>r[j]))),n]])
+      + table([o.w==='none'?"Cohen's κ":`Weighted κ (${o.w})`,'SE','95% CI','z','p','Observed agreement','Expected agreement'],[[`<b>${f(kap)}</b>`,f(se),ci([kap-1.959964*se,kap+1.959964*se]),f(z),P(pZ(z,'two')),f(po),f(pe)]])
+      + note(`Landis & Koch: ≤ .20 slight, .21–.40 fair, .41–.60 moderate, .61–.80 substantial, > .80 almost perfect. ${o.w!=='none'?'Category order: '+L.map(esc).join(' < ')+'.':''}`)
+      + report(`κ = ${f(kap,2)} (${lab} agreement), 95% CI [${f(kap-1.959964*se,2)}, ${f(kap+1.959964*se,2)}], p ${pAPA(pZ(z,'two'))}`);
+  }},
+icc:{ g:'Agreement & diagnostics', name:'Intraclass correlation (ICC)',
+  fields:[{k:'vars',t:'nums',label:'Raters / measurements (one column each, ≥ 2)'},CONF],
+  run(o){
+    need(o.vars.length>=2,'Select at least 2 columns.');
+    const C=o.vars.map(numCol), k=C.length, M=C[0].map((_,i)=>C.map(c=>c[i])).filter(r=>r.every(Number.isFinite)), n=M.length; need(n>=3,'Need at least 3 complete cases.');
+    const conf=o.conf||0.95, al=1-conf, gm=mean(M.flat());
+    const ssr=k*sum(M.map(r=>(mean(r)-gm)**2)), ssc=n*sum(o.vars.map((_,j)=>(mean(M.map(r=>r[j]))-gm)**2)), sst=sum(M.flat().map(v=>(v-gm)**2)), sse=sst-ssr-ssc;
+    const msr=ssr/(n-1), msc=ssc/(k-1), mse=sse/((n-1)*(k-1)), msw=(ssc+sse)/(n*(k-1));
+    const out=[];
+    { const F=msr/msw, d1=n-1, d2=n*(k-1), FL=F/fInv(1-al/2,d1,d2), FU=F*fInv(1-al/2,d2,d1);
+      out.push(['ICC(1,1)','One-way random, single',(msr-msw)/(msr+(k-1)*msw),(FL-1)/(FL+k-1),(FU-1)/(FU+k-1),F,d1,d2]);
+      out.push(['ICC(1,k)','One-way random, average',(msr-msw)/msr,1-1/FL,1-1/FU,F,d1,d2]); }
+    { const F=msr/mse, d1=n-1, d2=(n-1)*(k-1), i2=(msr-mse)/(msr+(k-1)*mse+k*(msc-mse)/n);
+      const A=k*i2/(n*(1-i2)), B=1+k*i2*(n-1)/(n*(1-i2)), v=(A*msc+B*mse)**2/((A*msc)**2/(k-1)+(B*mse)**2/((n-1)*(k-1)));
+      const F1=fInv(1-al/2,n-1,v), F2=fInv(1-al/2,v,n-1);
+      const L=n*(msr-F1*mse)/(F1*(k*msc+(k*n-k-n)*mse)+n*msr), U=n*(F2*msr-mse)/(k*msc+(k*n-k-n)*mse+n*F2*msr);
+      out.push(['ICC(2,1)','Two-way random, absolute agreement, single',i2,L,U,F,d1,d2]);
+      out.push(['ICC(2,k)','Two-way random, absolute agreement, average',(msr-mse)/(msr+(msc-mse)/n),L*k/(1+L*(k-1)),U*k/(1+U*(k-1)),F,d1,d2]);
+      const FL=F/fInv(1-al/2,d1,d2), FU=F*fInv(1-al/2,d2,d1);
+      out.push(['ICC(3,1)','Two-way mixed, consistency, single',(msr-mse)/(msr+(k-1)*mse),(FL-1)/(FL+k-1),(FU-1)/(FU+k-1),F,d1,d2]);
+      out.push(['ICC(3,k)','Two-way mixed, consistency, average',(msr-mse)/msr,1-1/FL,1-1/FU,F,d1,d2]); }
+    const i21=out[2][2], lab=i21<0.5?'poor':i21<0.75?'moderate':i21<0.9?'good':'excellent';
+    return table(['Type','Model','ICC',`${Math.round(conf*100)}% CI`,'F','df1','df2','p'],out.map(r=>[r[0],r[1],`<b>${f(r[2])}</b>`,ci([r[3],r[4]]),f(r[5]),r[6],f(r[7],0),P(fUpper(r[5],r[6],r[7]))]))
+      + note(`${n} subjects × ${k} raters (${AR().length-n} incomplete rows excluded). Shrout & Fleiss notation. Koo & Li (2016): < .5 poor, .5–.75 moderate, .75–.9 good, > .9 excellent. ICC(2,1) is the usual choice for absolute agreement between raters.`)
+      + report(`ICC(2,1) = ${f(i21,2)} (${lab}), ${Math.round(conf*100)}% CI [${f(out[2][3],2)}, ${f(out[2][4],2)}]`);
+  }},
+bland:{ g:'Agreement & diagnostics', name:'Bland–Altman plot',
+  fields:[{k:'x',t:'num',label:'Method A'},{k:'y',t:'num',label:'Method B',nth:1}],
+  run(o){
+    const [x,y]=pairs(o.x,o.y), n=x.length; need(n>=3,'Need at least 3 complete pairs.');
+    const d=x.map((v,i)=>v-y[i]), m=x.map((v,i)=>(v+y[i])/2), md=mean(d), s=sd(d), tq=tinv(0.975,n-1);
+    const lo=md-1.96*s, hi=md+1.96*s, seb=s/Math.sqrt(n), sel=s*Math.sqrt(3/n);
+    const r=pearson(m,d), b=r*sd(d)/sd(m), t=r*Math.sqrt((n-2)/(1-r*r)), pb=pT(t,n-2,'two');
+    return table(['','Estimate','95% CI'],[['Bias (mean difference)',`<b>${f(md)}</b>`,ci([md-tq*seb,md+tq*seb])],['SD of differences',f(s),''],['Lower limit of agreement',f(lo),ci([lo-tq*sel,lo+tq*sel])],['Upper limit of agreement',f(hi),ci([hi-tq*sel,hi+tq*sel])]])
+      + table(['Proportional bias (difference ~ mean)','Slope','t','p'],[['',f(b),f(t),P(pb)]])
+      + `<div class="plots">${scatterSVG(m,d,{xlab:`Mean of ${D.cols[o.x]} and ${D.cols[o.y]}`,ylab:`${D.cols[o.x]} − ${D.cols[o.y]}`,title:'Bland–Altman plot',hlines:[[md,'line','bias'],[lo,'ref','−1.96 SD'],[hi,'ref','+1.96 SD'],[0,'grid','']]})}</div>`
+      + note(`n = ${n} pairs. 95% of differences are expected to lie between the limits of agreement. A significant slope suggests the difference changes with the magnitude of measurement.`)
+      + (pb<0.05?warn('Proportional bias detected — the limits of agreement may not be valid across the whole measurement range.'):'')
+      + report(`Bias = ${f(md,2)}, 95% limits of agreement ${f(lo,2)} to ${f(hi,2)}`);
+  }},
+km:{ g:'Survival', name:'Kaplan–Meier & log-rank test',
+  fields:[{k:'t',t:'num',label:'Time variable'},{k:'e',t:'col',label:'Status variable'},{k:'ev',t:'level',of:'e',label:'Event value (others = censored)'},{k:'g',t:'col',label:'Compare groups (optional)',optional:true},{k:'tbl',t:'check',label:'Show full survival tables'}],
+  run(o){
+    const T=numCol(o.t), E=strCol(o.e), G=o.g>=0?strCol(o.g):null;
+    const idx=T.map((_,i)=>i).filter(i=>Number.isFinite(T[i])&&T[i]>=0&&E[i]!=null&&(!G||G[i]!=null)); need(idx.length>=2,'Not enough complete data.');
+    const lv=G?sortLevels([...new Set(idx.map(i=>G[i]))]):['All']; need(lv.length<=8,'Too many groups (max 8).');
+    const fits=lv.map(L=>{ const ii=idx.filter(i=>!G||G[i]===L); return {L, n:ii.length, fit:kmFit(ii.map(i=>T[i]),ii.map(i=>E[i]===o.ev))}; });
+    const tmax=Math.max(...idx.map(i=>T[i]));
+    const Pl=makePlot({xmin:0,xmax:tmax,ymin:0,ymax:1,xlab:D.cols[o.t],ylab:'Survival probability',title:'Kaplan–Meier survival curves',legend:G?lv:null});
+    let g='';
+    fits.forEach(({fit},k)=>{ const col=PAL[k%PAL.length]; let d=`M${Pl.sx(0)},${Pl.sy(1)}`, S=1;
+      fit.steps.forEach(s=>{ d+=`H${Pl.sx(s.t)}V${Pl.sy(s.S)}`; S=s.S; });
+      const last=Math.max(fit.steps.length?fit.steps[fit.steps.length-1].t:0, ...fit.cens.map(c=>c.t)); d+=`H${Pl.sx(last)}`;
+      g+=`<path d="${d}" style="stroke:${col};stroke-width:2;fill:none"/>`;
+      fit.cens.forEach(c=>{ g+=`<line x1="${Pl.sx(c.t)}" x2="${Pl.sx(c.t)}" y1="${Pl.sy(c.S)-5}" y2="${Pl.sy(c.S)+5}" style="stroke:${col};stroke-width:1.5"><title>censored at ${f(c.t)}</title></line>`; }); });
+    let out=table(['Group','N','Events','Censored','Median survival','95% CI'],fits.map(({L,n,fit})=>{ const ev=sum(fit.steps.map(s=>s.d)); return [esc(L),n,ev,n-ev,f(fit.median),fit.median===fit.median?`[${f(fit.medLo)}, ${Number.isNaN(fit.medHi)?'NA':f(fit.medHi)}]`:'—']; }));
+    let rep='';
+    if (G){ const gi=idx.map(i=>lv.indexOf(G[i])), lr=logrank(idx.map(i=>T[i]),idx.map(i=>E[i]===o.ev),gi,lv.length);
+      out+=h5('Log-rank (Mantel–Cox) test')+table(['Group','Observed events','Expected events'],lv.map((L,k)=>[esc(L),lr.O[k],f(lr.E[k],2)]))+table(['χ²','df','p'],[[f(lr.chi),lr.df,P(lr.p)]]);
+      rep=report(`Log-rank χ²(${lr.df}) = ${f(lr.chi,2)}, p ${pAPA(lr.p)}`); }
+    if (o.tbl) fits.forEach(({L,fit})=>{ out+=h5(`Survival table${G?': '+esc(L):''}`)+table(['Time','At risk','Events','Censored','Survival','SE','95% CI'],fit.steps.slice(0,300).map(s=>[f(s.t),s.n,s.d,s.c,f(s.S,4),f(s.se,4),ci([s.lo,s.hi])])); });
+    return out+`<div class="plots">${Pl.wrap(g)}</div>`+note(`Event = "${esc(o.ev)}"; all other status values are treated as censored (tick marks). Median CI uses the log–log method; NA = not reached.`)+rep;
+  }},
+kmeans:{ g:'Multivariate', name:'K-means clustering',
+  fields:[{k:'vars',t:'nums',label:'Variables'},{k:'k',t:'number',label:'Number of clusters (k)',def:3},{k:'std',t:'check',label:'Standardize variables (recommended)',def:true},{k:'save',t:'check',label:'Save cluster membership as a new column'}],
+  run(o){
+    need(o.vars.length>=1,'Select at least one variable.'); const k=Math.round(o.k||0); need(k>=2,'k must be at least 2.');
+    const rows=AR(), C=o.vars.map(numCol), idx=C[0].map((_,i)=>i).filter(i=>C.every(c=>Number.isFinite(c[i]))), n=idx.length; need(n>k,'Need more complete cases than clusters.');
+    const mu=C.map(c=>mean(idx.map(i=>c[i]))), sg=C.map(c=>o.std?sd(idx.map(i=>c[i]))||1:1);
+    const X=idx.map(i=>C.map((c,j)=>(c[i]-mu[j])/sg[j])), R=kmeans(X,k);
+    const gc=X[0].map((_,j)=>mean(X.map(x=>x[j]))), tss=sum(X.map(x=>sum(x.map((v,j)=>(v-gc[j])**2))));
+    const sizes=[...Array(k).keys()].map(c=>R.lab.filter(l=>l===c).length);
+    const wss=[...Array(k).keys()].map(c=>sum(X.filter((_,i)=>R.lab[i]===c).map(x=>sum(x.map((v,j)=>(v-R.C[c][j])**2)))));
+    let px, py, xl, yl;
+    if (o.vars.length===1){ px=X.map(x=>x[0]); py=X.map((_,i)=>i); xl=D.cols[o.vars[0]]; yl='Case'; }
+    else if (o.vars.length===2){ px=X.map(x=>x[0]); py=X.map(x=>x[1]); xl=D.cols[o.vars[0]]; yl=D.cols[o.vars[1]]; }
+    else { const Zs=X.map(x=>x.map((v,j)=>o.std?v:v/(sd(X.map(z=>z[j]))||1))), p=o.vars.length;
+      const Rm=[...Array(p)].map((_,a)=>[...Array(p)].map((_,b)=>sum(Zs.map(z=>z[a]*z[b]))/(n-1))), E=jacobiEig(Rm);
+      px=Zs.map(z=>sum(z.map((v,j)=>v*E.vectors[j][0]))); py=Zs.map(z=>sum(z.map((v,j)=>v*E.vectors[j][1]))); xl='PC1'; yl='PC2'; }
+    let out=table(['Cluster','Size','% of cases','Within-cluster SS'],sizes.map((s,c)=>[c+1,s,f(100*s/n,1),f(wss[c])]))
+      + table(['Total within SS','Between SS','Between / total SS'],[[f(R.inertia),f(tss-R.inertia),f(100*(tss-R.inertia)/tss,1)+'%']])
+      + h5('Cluster centres (original units)')+table(['Variable',...sizes.map((_,c)=>`Cluster ${c+1}`)],o.vars.map((j,v)=>[cname(j),...R.C.map(c=>f(c[v]*sg[v]+mu[v]))]));
+    if (o.save){ const nm=saveCols(rows,idx,[['cluster',R.lab.map(l=>l+1)]]); out+=note(`Saved cluster membership as "${esc(nm[0])}".`); }
+    return out+`<div class="plots">${scatterSVG(px,py,{xlab:xl,ylab:yl,groups:R.lab.map(l=>`Cluster ${l+1}`),title:o.vars.length>2?'Clusters on the first two principal components':'Clusters'})}</div>`
+      + note(`k-means++ initialization with Hartigan refinement, best of 50 runs (fixed seed, so results are reproducible). ${o.std?'Variables standardized to z-scores. ':''}${AR().length-n} incomplete rows excluded.`);
   }},
 };
 
@@ -1504,15 +1843,66 @@ function openRecode(){
 }
 function need2(){ if (!D.cols.length){ alert('Load some data first.'); throw new Error('no data'); } }
 
+function svgString(svg){
+  const NS='http://www.w3.org/2000/svg', clone=svg.cloneNode(true), src=[svg,...svg.querySelectorAll('*')], dst=[clone,...clone.querySelectorAll('*')];
+  const props=['fill','fill-opacity','stroke','stroke-width','stroke-dasharray','stroke-opacity','opacity','font-size','font-family','font-weight'];
+  src.forEach((el,i)=>{ const cs=getComputedStyle(el); dst[i].setAttribute('style',props.map(q=>`${q}:${cs.getPropertyValue(q)}`).join(';')); dst[i].removeAttribute('class'); });
+  const vb=svg.viewBox.baseVal; clone.setAttribute('xmlns',NS); clone.setAttribute('width',vb.width); clone.setAttribute('height',vb.height);
+  const bg=document.createElementNS(NS,'rect'); bg.setAttribute('width','100%'); bg.setAttribute('height','100%'); bg.setAttribute('fill',getComputedStyle(svg.closest('.card')||document.body).backgroundColor);
+  clone.insertBefore(bg,clone.firstChild);
+  return new XMLSerializer().serializeToString(clone);
+}
+function openTransform(){
+  need2();
+  const nums=D.cols.map((c,j)=>[j,c]).filter(([j])=>colIsNum(j)); if (!nums.length){ alert('No numeric columns.'); return; }
+  openDialog('Transform columns', `<fieldset><legend>Columns</legend><div class="checks">${nums.map(([j,c])=>`<label class="ck"><input type="checkbox" name="cols" value="${j}">${esc(c)}</label>`).join('')}</div></fieldset>
+    <label class="f">Transformation<select name="m"><option value="z">Standardize (z-score)</option><option value="center">Center (subtract mean)</option><option value="minmax">Rescale to 0–1 (min–max)</option><option value="ln">Natural log (ln)</option><option value="log10">Log base 10</option><option value="sqrt">Square root</option><option value="rank">Rank (average ties)</option><option value="pct">Percentile rank (0–100)</option></select></label>
+    <span class="hint">Creates a new column for each selected column (e.g. <code>age_z</code>). Statistics are computed over all non-missing rows. Values outside the valid range (e.g. log of 0) become missing.</span>`, 'Transform', ()=>{
+    const F=$('#dlgForm'), cols=[...F.querySelectorAll('input[name=cols]:checked')].map(e=>+e.value), m=F.elements.m.value; need(cols.length,'Select at least one column.');
+    snap();
+    for (const j of cols){
+      const v=D.rows.map(r=>toNum(r[j])), ok=v.map(Number.isFinite), a=v.filter(Number.isFinite), mu=mean(a), s=sd(a), mn=Math.min(...a), mx=Math.max(...a);
+      const rk=rank(a).r; let q=0; const rr=ok.map(o=>o?rk[q++]:NaN);
+      const fn={z:(x)=>(x-mu)/s, center:x=>x-mu, minmax:x=>(x-mn)/(mx-mn), ln:x=>x>0?Math.log(x):NaN, log10:x=>x>0?Math.log10(x):NaN, sqrt:x=>x>=0?Math.sqrt(x):NaN, rank:(x,i)=>rr[i], pct:(x,i)=>100*(rr[i]-1)/(a.length-1)}[m];
+      D.cols.push(uniqueName(`${D.cols[j]}_${m}`)); D.rows.forEach((r,i)=>{ const y=ok[i]?fn(v[i],i):NaN; r.push(Number.isFinite(y)?String(+y.toPrecision(10)):''); });
+    }
+    dataChanged(true);
+  });
+}
+$('#bTransform').onclick=()=>openTransform();
+$('#bSaveProj').onclick=()=>download(`statbench-${new Date().toISOString().slice(0,10)}.statbench.json`, JSON.stringify({app:'StatBench',version:1,saved:new Date().toISOString(),data:D,results:$('#results').innerHTML}), 'application/json');
+$('#bOpenProj').onclick=()=>$('#projFile').click();
+$('#projFile').onchange=e=>{
+  const fl=e.target.files[0]; e.target.value=''; if (!fl) return;
+  const rd=new FileReader();
+  rd.onload=()=>{ try {
+    const pj=JSON.parse(rd.result); need(pj && pj.app==='StatBench' && pj.data && Array.isArray(pj.data.cols) && Array.isArray(pj.data.rows),'Not a StatBench project file.');
+    if ((D.cols.length || $('#results').children.length) && !confirm('Replace the current data and results with this project?')) return;
+    if (D.cols.length) snap();
+    D={cols:pj.data.cols.map(String), rows:pj.data.rows.map(r=>pj.data.cols.map((_,j)=>String(r[j]??''))), filter:typeof pj.data.filter==='string'?pj.data.filter:undefined};
+    $('#results').innerHTML=sanitizeHTML(String(pj.results||'')); saveResults(); dataChanged(true); showTab('data');
+  } catch(err){ alert('Could not open project: '+err.message); } };
+  rd.readAsText(fl);
+};
+
 /* ================= Results ================= */
 function addResult(title, html, useData=true){
   const el=document.createElement('article'); el.className='card';
   const flt = useData && D.filter && MASK ? `Filter: <code>${esc(D.filter)}</code> (n = ${MASK.filter(Boolean).length}) · ` : '';
   el.innerHTML=`<header><h3>${esc(title)}</h3><span class="meta">${flt}${new Date().toLocaleString()}</span><button class="copy" title="Copy tables as tab-separated text (paste into Excel/Word)">Copy</button><button class="x" title="Remove">×</button></header><div class="body">${html}</div>`;
+  el.querySelectorAll('svg.plot').forEach(svg=>{ const w=document.createElement('div'); w.className='pw'; svg.replaceWith(w); w.append(svg);
+    w.insertAdjacentHTML('beforeend','<div class="dlbar"><button class="dl" data-f="png" title="Download as PNG image">PNG</button><button class="dl" data-f="svg" title="Download as SVG vector image">SVG</button></div>'); });
   $('#results').prepend(el); saveResults(); showTab('results'); window.scrollTo({top:0});
 }
 $('#results').addEventListener('click', e=>{
   if (e.target.matches('.card>header .x')){ e.target.closest('.card').remove(); saveResults(); }
+  else if (e.target.matches('.dl')){
+    const svg=e.target.closest('.pw').querySelector('svg'), str=svgString(svg), name=(svg.querySelector('.ttl')?.textContent||'chart').replace(/[^\w-]+/g,'_').slice(0,40);
+    if (e.target.dataset.f==='svg') download(name+'.svg', str, 'image/svg+xml');
+    else { const vb=svg.viewBox.baseVal, img=new Image(), sc=2;
+      img.onload=()=>{ const c=document.createElement('canvas'); c.width=vb.width*sc; c.height=vb.height*sc; const ctx=c.getContext('2d'); ctx.scale(sc,sc); ctx.drawImage(img,0,0); c.toBlob(b=>download(name+'.png',b)); };
+      img.src='data:image/svg+xml;charset=utf-8,'+encodeURIComponent(str); }
+  }
   else if (e.target.matches('.card>header .copy')){
     const card=e.target.closest('.card'), parts=[card.querySelector('h3').textContent];
     for (const el of card.querySelectorAll('.body > h5, .body > table, .body > .note, .body > .report, .body > .warn')){
@@ -1529,7 +1919,7 @@ $('#bClearRes').onclick=()=>{ if ($('#results').children.length && confirm('Remo
 $('#bPrint').onclick=()=>window.print();
 $('#bSaveRes').onclick=()=>{
   const css=document.querySelector('style').textContent, theme=document.documentElement.dataset.theme||'';
-  download('statbench-results.html', `<!doctype html><html lang="en"${theme?` data-theme="${theme}"`:''}><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>StatBench results</title><style>${css} main{max-width:980px;margin:0 auto}.card .x,.card .copy{display:none}</style></head><body><main><div id="results">${$('#results').innerHTML}</div></main></body></html>`, 'text/html');
+  download('statbench-results.html', `<!doctype html><html lang="en"${theme?` data-theme="${theme}"`:''}><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>StatBench results</title><style>${css} main{max-width:980px;margin:0 auto}.card .x,.card .copy,.dlbar{display:none}</style></head><body><main><div id="results">${$('#results').innerHTML}</div></main></body></html>`, 'text/html');
 };
 
 /* ================= Shell ================= */
@@ -1541,7 +1931,8 @@ document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>showTab(b.dat
 (function buildSide(){
   const groups=new Map();
   for (const [k,A] of Object.entries(AN)){ if (!groups.has(A.g)) groups.set(A.g,[]); groups.get(A.g).push(`<button data-an="${k}">${A.name}</button>`); }
-  $('#side').innerHTML=[...groups].map(([g,b])=>`<h4>${g}</h4>${b.join('')}`).join('');
+  const ORDER=['Describe','Graphs','Compare means','Nonparametric','Relationships','Categorical','Agreement & diagnostics','Survival','Multivariate','Planning'];
+  $('#side').innerHTML=[...groups].sort((a,b)=>(ORDER.indexOf(a[0])+99)%99-(ORDER.indexOf(b[0])+99)%99).map(([g,b])=>`<h4>${g}</h4>${b.join('')}`).join('');
   $('#side').addEventListener('click', e=>{ const b=e.target.closest('[data-an]'); if (b) openAnalysis(b.dataset.an); });
 })();
 const THEMES=['auto','light','dark'];
