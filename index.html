@@ -93,6 +93,8 @@ table.data tr.off td:not(.rn){opacity:.35}
 .filterbar[hidden]{display:none}
 .filterbar code,.card code,dialog code{font-family:ui-monospace,monospace;font-size:12px}
 .card>header button.copy,.card>header button.mv{padding:2px 9px;font-size:12px}
+.card>header .inc{display:flex;align-items:center;gap:4px;font-size:12px;color:var(--muted);cursor:pointer}
+.card.noexp>header h3{opacity:.55}
 .card [contenteditable="true"]{border-radius:4px;outline:1px dashed transparent;outline-offset:2px}
 .card [contenteditable="true"]:hover{outline-color:var(--border)}
 .card [contenteditable="true"]:focus{outline:2px solid var(--accent)}
@@ -122,20 +124,20 @@ table.rpt th{background:var(--panel2);font-weight:700}
 .plots{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:12px;margin-top:8px}
 .plots.one{grid-template-columns:1fr}
 svg.plot{width:100%;max-width:640px;height:auto;display:block}
-svg.plot text{fill:var(--muted);font-size:11px;font-family:inherit}
+svg.plot text{fill:var(--muted);font-size:var(--chart-font,11px);font-family:inherit}
 svg.plot .ttl{fill:var(--text);font-weight:600;font-size:12px}
 svg.plot .grid{stroke:var(--grid)}
 svg.plot .axis{stroke:var(--border)}
-svg.plot .bar{fill:var(--accent);opacity:.85}
+svg.plot .bar{fill:var(--c1,var(--accent));opacity:.85}
 svg.plot .bar:hover{opacity:1}
-svg.plot .pt{fill:var(--accent);fill-opacity:.6;stroke:var(--panel);stroke-width:.8}
-svg.plot .line{stroke:var(--accent2);stroke-width:2;fill:none}
+svg.plot .pt{fill:var(--c1,var(--accent));fill-opacity:.6;stroke:var(--panel);stroke-width:.8}
+svg.plot .line{stroke:var(--c2,var(--accent2));stroke-width:2;fill:none}
 svg.plot .ref{stroke:var(--muted);stroke-dasharray:4 4;fill:none}
-svg.plot .box{fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5}
-svg.plot .med{stroke:var(--accent);stroke-width:2.5}
-svg.plot .whisk{stroke:var(--accent);stroke-width:1.3}
-svg.plot .out{fill:none;stroke:var(--accent2);stroke-width:1.3}
-svg.plot .mean{fill:var(--accent2)}
+svg.plot .box{fill:var(--accent-soft);stroke:var(--c1,var(--accent));stroke-width:1.5}
+svg.plot .med{stroke:var(--c1,var(--accent));stroke-width:2.5}
+svg.plot .whisk{stroke:var(--c1,var(--accent));stroke-width:1.3}
+svg.plot .out{fill:none;stroke:var(--c2,var(--accent2));stroke-width:1.3}
+svg.plot .mean{fill:var(--c2,var(--accent2))}
 
 dialog{border:1px solid var(--border);border-radius:12px;padding:0;background:var(--panel);color:var(--text);width:min(520px,calc(100vw - 32px));box-shadow:0 20px 60px rgba(0,0,0,.3)}
 dialog::backdrop{background:rgba(10,14,20,.45)}
@@ -162,7 +164,7 @@ textarea.paste{width:100%;min-height:200px;font-family:ui-monospace,monospace;fo
   .top{gap:8px;flex-wrap:wrap}
 }
 @media print{
-  .top,.side,.toolbar,#tab-data,.card .x,.card .copy,.card .mv,.dlbar{display:none!important}
+  .top,.side,.toolbar,#tab-data,.card .x,.card .copy,.card .mv,.card .inc,.dlbar{display:none!important}
   .app{display:block}
   #tab-results{display:block!important}
   .card{break-inside:avoid;box-shadow:none}
@@ -201,6 +203,7 @@ textarea.paste{width:100%;min-height:200px;font-family:ui-monospace,monospace;fo
         <button id="bSort">Sort…</button>
         <button id="bFilter">Filter…</button>
         <button id="bMissing">Missing…</button>
+        <button id="bRestructure" title="Convert between wide (one row per subject) and long (one row per measurement) format">Wide ↔ long…</button>
         <span class="sep"></span>
         <button id="bExport">Export CSV</button>
         <button id="bClear" class="danger">Clear</button>
@@ -212,7 +215,8 @@ textarea.paste{width:100%;min-height:200px;font-family:ui-monospace,monospace;fo
     </section>
     <section id="tab-results" hidden>
       <div class="toolbar">
-        <button id="bWord" class="primary" title="Word document with numbered tables, figures and captions">Export Word (.docx)</button>
+        <button id="bWord" class="primary" title="Word document with numbered tables, figures and captions">Export Word (.docx)…</button>
+        <button id="bChartStyle" title="Colours, text size and size of charts">Chart style…</button>
         <button id="bSaveRes">Export results (HTML)</button>
         <button id="bPrint">Print / PDF</button>
         <button id="bClearRes" class="danger">Clear results</button>
@@ -793,6 +797,7 @@ $('#bRecode').onclick=()=>openRecode();
 $('#bSort').onclick=()=>openSort();
 $('#bFilter').onclick=()=>openFilter();
 $('#bMissing').onclick=()=>openMissing();
+$('#bRestructure').onclick=()=>openRestructure();
 $('#bFilterOff').onclick=()=>{ snap(); D.filter=undefined; dataChanged(true); };
 $('#bUndo').onclick=undo;
 document.addEventListener('keydown', e=>{
@@ -829,6 +834,109 @@ function need(cond, msg){ if (!cond) throw new Error(msg); }
 
 /* ================= SVG charts ================= */
 const PAL=['#3b82f6','#f97316','#10b981','#a855f7','#ec4899','#06b6d4','#eab308','#64748b'];
+const PALETTES={vivid:['#3b82f6','#f97316','#10b981','#a855f7','#ec4899','#06b6d4','#eab308','#64748b'],
+  colorblind:['#0072B2','#E69F00','#009E73','#CC79A7','#56B4E9','#D55E00','#F0E442','#000000'],
+  journal:['#1F4E79','#C00000','#548235','#7030A0','#BF8F00','#2E75B6','#7F7F7F','#000000'],
+  gray:['#404040','#a6a6a6','#737373','#d0d0d0','#1a1a1a','#8c8c8c','#5a5a5a','#bfbfbf'],
+  pastel:['#8ecae6','#ffb703','#90be6d','#cdb4db','#f4a261','#a8dadc','#e9c46a','#b0b0b0']};
+const PAL_NAMES={vivid:'Vivid (default)',colorblind:'Colour-blind safe (Okabe–Ito)',journal:'Journal (dark, print friendly)',gray:'Grayscale (black & white printing)',pastel:'Pastel'};
+const SIZES={small:[520,320],medium:[600,360],large:[720,430],wide:[780,340],square:[520,500]};
+let CHART={palette:'vivid',font:11,size:'medium'};
+function applyChartStyle(){
+  PAL.splice(0,PAL.length,...(PALETTES[CHART.palette]||PALETTES.vivid));
+  const r=document.documentElement.style; r.setProperty('--c1',PAL[0]); r.setProperty('--c2',PAL[1]); r.setProperty('--chart-font',CHART.font+'px');
+}
+function openChartStyle(){
+  openDialog('Chart style', `<label class="f">Colour palette<select name="pal">${Object.keys(PALETTES).map(k=>`<option value="${k}"${CHART.palette===k?' selected':''}>${PAL_NAMES[k]}</option>`).join('')}</select></label>
+    <div id="palPrev" style="display:flex;gap:4px"></div>
+    <label class="f">Text size in charts<select name="font">${[9,10,11,12,13,14,16].map(v=>`<option${CHART.font===v?' selected':''}>${v}</option>`).join('')}</select></label>
+    <label class="f">Chart size / shape<select name="size">${Object.entries({small:'Small',medium:'Medium (default)',large:'Large',wide:'Wide',square:'Square'}).map(([k,v])=>`<option value="${k}"${CHART.size===k?' selected':''}>${v}</option>`).join('')}</select></label>
+    <span class="hint">Colours and text size update existing charts; size and new colours for multi-group charts apply to charts you create from now on. Exports (PNG, SVG, Word) use these settings.</span>`, 'Apply', ()=>{
+    const F=$('#dlgForm'); CHART={palette:F.elements.pal.value, font:+F.elements.font.value, size:F.elements.size.value};
+    store.set('statbench.chart',JSON.stringify(CHART)); applyChartStyle();
+  });
+  const sel=$('#dlgForm').elements.pal, prev=()=>{ $('#palPrev').innerHTML=PALETTES[sel.value].map(c=>`<span style="width:28px;height:18px;border-radius:3px;background:${c}"></span>`).join(''); }; sel.onchange=prev; prev();
+}
+const stars=p=>p<0.001?'***':p<0.01?'**':p<0.05?'*':'ns';
+function sigPairs(groups, test){ // Bonferroni-adjusted pairwise tests between groups
+  const k=groups.length, m=k*(k-1)/2, out=[];
+  for (let i=0;i<k;i++) for (let j=i+1;j<k;j++){ const a=groups[i], b=groups[j]; if (a.length<2||b.length<2) continue;
+    out.push({i,j,p:Math.min(1,m*(test==='np'?mwP(a,b):studentP(a,b)))}); }
+  return out.length>3 ? out.filter(q=>q.p<0.05) : out;
+}
+function bracketsSVG(Pl, pairs, xpos, base, step){
+  let g='';
+  pairs.slice().sort((a,b)=>(a.j-a.i)-(b.j-b.i)||a.i-b.i).forEach((q,l)=>{ const y=Pl.sy(base+step*(l+0.55)), x1=xpos(q.i)+3, x2=xpos(q.j)-3;
+    g+=`<path d="M${x1},${y+6}V${y}H${x2}V${y+6}" style="stroke:var(--text);stroke-width:1.1;fill:none"/><text x="${(x1+x2)/2}" y="${y-3}" text-anchor="middle" style="fill:var(--text);font-weight:700">${stars(q.p)}</text>`; });
+  return g;
+}
+const jit=(i,k)=>{ const v=Math.sin(i*12.9898+k*78.233)*43758.5453; return v-Math.floor(v)-0.5; };
+function boxDotsSVG(groups, {ylab,xlab,title,yhi,ylo,extra,dots=true}={}){
+  const all=groups.flatMap(g=>g[1]); const Pl=makePlot({ymin:Math.min(...all),ymax:Math.max(...all),cats:groups.map(g=>g[0]),ylab,xlab,title,ylo,yhi});
+  const bw=Math.min(80,Pl.pw/groups.length*0.5); let g='';
+  groups.forEach(([lab,a],i)=>{ if (!a.length) return; const b=boxStat(a), x=Pl.sx(i), col=PAL[i%PAL.length];
+    g+=`<path d="M${x},${Pl.sy(b.lo)}V${Pl.sy(b.q1)}M${x},${Pl.sy(b.q3)}V${Pl.sy(b.hi)}M${x-bw/4},${Pl.sy(b.lo)}H${x+bw/4}M${x-bw/4},${Pl.sy(b.hi)}H${x+bw/4}" style="stroke:${col};stroke-width:1.5;fill:none"/>`;
+    g+=`<rect x="${x-bw/2}" y="${Pl.sy(b.q3)}" width="${bw}" height="${Math.max(1,Pl.sy(b.q1)-Pl.sy(b.q3))}" rx="2" style="fill:${col};fill-opacity:.15;stroke:${col};stroke-width:1.8"><title>${esc(lab)}: median ${f(b.md)}, IQR ${f(b.q1)}–${f(b.q3)}, n=${b.n}</title></rect><line x1="${x-bw/2}" x2="${x+bw/2}" y1="${Pl.sy(b.md)}" y2="${Pl.sy(b.md)}" style="stroke:${col};stroke-width:2.5"/>`;
+    if (dots) a.forEach((v,k)=>{ g+=`<circle cx="${(x+jit(k,i)*bw*0.75).toFixed(1)}" cy="${Pl.sy(v).toFixed(1)}" r="2.6" style="fill:${col};fill-opacity:.55"/>`; }); });
+  return Pl.wrap(g+(extra?extra(Pl):''));
+}
+function violinSVG(groups, {ylab,xlab,title,yhi,ylo,extra}={}){
+  const all=groups.flatMap(g=>g[1]); const Pl=makePlot({ymin:Math.min(...all),ymax:Math.max(...all),cats:groups.map(g=>g[0]),ylab,xlab,title,ylo,yhi});
+  const half=Math.min(60,Pl.pw/groups.length*0.4); let g='';
+  groups.forEach(([lab,a],i)=>{ if (a.length<2) return; const s=summary(a), col=PAL[i%PAL.length], x=Pl.sx(i);
+    const bw=0.9*Math.min(s.sd,s.iqr/1.34||s.sd)*a.length**-0.2||1, lo=s.min, hi=s.max, G=60, ys=[...Array(G+1)].map((_,q)=>lo+(hi-lo)*q/G);
+    const dens=ys.map(y=>sum(a.map(v=>Math.exp(-0.5*((y-v)/bw)**2)))), mx=Math.max(...dens);
+    const right=ys.map((y,q)=>`${(x+half*dens[q]/mx).toFixed(1)},${Pl.sy(y).toFixed(1)}`), left=ys.map((y,q)=>`${(x-half*dens[q]/mx).toFixed(1)},${Pl.sy(y).toFixed(1)}`).reverse();
+    g+=`<path d="M${right.join('L')}L${left.join('L')}Z" style="fill:${col};fill-opacity:.35;stroke:${col};stroke-width:1.4"><title>${esc(lab)}: n=${a.length}, median ${f(s.median)}</title></path>`;
+    g+=`<line x1="${x}" x2="${x}" y1="${Pl.sy(s.q1)}" y2="${Pl.sy(s.q3)}" style="stroke:var(--text);stroke-width:5;stroke-linecap:round"/><circle cx="${x}" cy="${Pl.sy(s.median)}" r="3.5" style="fill:var(--panel);stroke:var(--text)"/>`; });
+  return Pl.wrap(g+(extra?extra(Pl):''));
+}
+function dotErrSVG(cats, series, {ylab,xlab,title,yhi,ylo,extra}={}){ // series: [{name, m[], lo[], hi[]}]
+  const v=series.flatMap(s=>[...s.m,...s.lo,...s.hi]).filter(Number.isFinite);
+  const Pl=makePlot({ymin:Math.min(...v),ymax:Math.max(...v),cats,ylab,xlab,title,ylo,yhi,legend:series.length>1?series.map(s=>s.name):null});
+  const dodge=series.length>1?Math.min(16,Pl.pw/cats.length*0.5/series.length):0; let g='';
+  series.forEach((s,k)=>{ const col=series.length>1?PAL[k%PAL.length]:null; cats.forEach((c,i)=>{ if (!Number.isFinite(s.m[i])) return; const x=Pl.sx(i)+(k-(series.length-1)/2)*dodge, cc=col||PAL[i%PAL.length];
+    if (Number.isFinite(s.lo[i])) g+=`<path d="M${x},${Pl.sy(s.hi[i])}V${Pl.sy(s.lo[i])}M${x-6},${Pl.sy(s.hi[i])}H${x+6}M${x-6},${Pl.sy(s.lo[i])}H${x+6}" style="stroke:${cc};stroke-width:1.6;fill:none"/>`;
+    g+=`<circle cx="${x}" cy="${Pl.sy(s.m[i])}" r="5" style="fill:${cc};stroke:var(--panel);stroke-width:1.2"><title>${esc(c)}: ${f(s.m[i])} [${f(s.lo[i])}, ${f(s.hi[i])}]</title></circle>`; }); });
+  return Pl.wrap(g+(extra?extra(Pl):''));
+}
+function stack100SVG(cats, segs, pct, {xlab,title}={}){ // pct[c][s]
+  const Pl=makePlot({ymin:0,ymax:100,cats,ylab:'Percentage (%)',xlab,title,legend:segs});
+  const bw=Math.min(90,Pl.pw/cats.length*0.6); let g='';
+  cats.forEach((c,i)=>{ let acc=0; segs.forEach((s,k)=>{ const v=pct[i][k]; if (!(v>0)) return; const y0=Pl.sy(acc), y1=Pl.sy(acc+v), x=Pl.sx(i);
+    g+=`<rect x="${x-bw/2}" y="${y1}" width="${bw}" height="${y0-y1}" style="fill:${PAL[k%PAL.length]};stroke:var(--panel);stroke-width:1"><title>${esc(c)} — ${esc(s)}: ${f(v,1)}%</title></rect>`;
+    if (v>=7) g+=`<text x="${x}" y="${(y0+y1)/2+4}" text-anchor="middle" style="fill:#fff;font-weight:700">${f(v,v>=10?0:1)}%</text>`; acc+=v; }); });
+  return Pl.wrap(g);
+}
+function histGroupSVG(groups, {bins,xlab,title}={}){
+  const all=groups.flatMap(g=>g[1]), lo=Math.min(...all), hi=Math.max(...all)>lo?Math.max(...all):lo+1, k=bins||Math.max(6,Math.ceil(Math.log2(all.length)+1)), bw=(hi-lo)/k;
+  const C=groups.map(([,a])=>{ const c=new Array(k).fill(0); a.forEach(v=>{ let i=Math.floor((v-lo)/bw); if (i>=k) i=k-1; c[i]++; }); return c.map(v=>100*v/a.length); });
+  const Pl=makePlot({xmin:lo,xmax:hi,ymin:0,ymax:Math.max(...C.flat()),xlab,ylab:'Percentage within group (%)',title,legend:groups.map(g=>g[0])});
+  let g=''; C.forEach((c,gi)=>c.forEach((v,i)=>{ const x0=Pl.sx(lo+i*bw), x1=Pl.sx(lo+(i+1)*bw); g+=`<rect x="${x0+0.5}" y="${Pl.sy(v)}" width="${Math.max(0,x1-x0-1)}" height="${Pl.sy(0)-Pl.sy(v)}" style="fill:${PAL[gi%PAL.length]};fill-opacity:.4;stroke:${PAL[gi%PAL.length]}"><title>${esc(groups[gi][0])}: ${f(lo+i*bw)}–${f(lo+(i+1)*bw)}: ${f(v,1)}%</title></rect>`; }));
+  return Pl.wrap(g);
+}
+function heatmapSVG(names, R, {title='Correlation heatmap'}={}){
+  const k=names.length, cell=Math.max(26,Math.min(60,420/k)), L=150, T=40, W=L+k*cell+80, H=T+k*cell+90;
+  const col=r=>{ const t=Math.min(1,Math.abs(r)), c=r>=0?[59,130,246]:[239,68,68]; return `rgb(${Math.round(255-(255-c[0])*t)},${Math.round(255-(255-c[1])*t)},${Math.round(255-(255-c[2])*t)})`; };
+  let g=`<text class="ttl" x="8" y="20">${esc(title)}</text>`;
+  names.forEach((n,i)=>{ g+=`<text x="${L-6}" y="${T+i*cell+cell/2+4}" text-anchor="end">${esc(String(n).slice(0,22))}</text><text transform="translate(${L+i*cell+cell/2} ${T+k*cell+8}) rotate(45)" text-anchor="start">${esc(String(n).slice(0,22))}</text>`;
+    names.forEach((_,j)=>{ const r=R[i][j]; g+=`<rect x="${L+j*cell}" y="${T+i*cell}" width="${cell-1}" height="${cell-1}" style="fill:${col(r)}"><title>${esc(names[i])} × ${esc(names[j])}: r = ${f(r)}</title></rect>`;
+      if (cell>=30) g+=`<text x="${L+j*cell+cell/2}" y="${T+i*cell+cell/2+4}" text-anchor="middle" style="fill:${Math.abs(r)>0.6?'#fff':'#222'};font-size:10px">${f(r,2)}</text>`; }); });
+  [-1,-0.5,0,0.5,1].forEach((v,q)=>{ g+=`<rect x="${L+k*cell+20}" y="${T+q*22}" width="16" height="16" style="fill:${col(v)};stroke:#999;stroke-width:.5"/><text x="${L+k*cell+42}" y="${T+q*22+12}">${v}</text>`; });
+  return `<svg class="plot" viewBox="0 0 ${W} ${H}" role="img">${g}</svg>`;
+}
+function spaghettiSVG(cats, subjects, groups, {ylab,title}={}){ // subjects: [{vals[], g}]
+  const all=subjects.flatMap(s=>s.vals).filter(Number.isFinite);
+  const Pl=makePlot({ymin:Math.min(...all),ymax:Math.max(...all),cats,ylab,title,legend:groups.length>1?groups:null}); let g='';
+  subjects.forEach(s=>{ const k=Math.max(0,groups.indexOf(s.g)), pts=s.vals.map((v,i)=>Number.isFinite(v)?[Pl.sx(i),Pl.sy(v)]:null); let d='', pen=false;
+    pts.forEach(p=>{ if (!p){ pen=false; return; } d+=(pen?'L':'M')+p[0].toFixed(1)+','+p[1].toFixed(1); pen=true; });
+    g+=`<path d="${d}" style="stroke:${PAL[k%PAL.length]};stroke-width:1;fill:none;opacity:.28"/>`; });
+  groups.forEach((G,k)=>{ const m=cats.map((_,i)=>{ const v=subjects.filter(s=>s.g===G).map(s=>s.vals[i]).filter(Number.isFinite); return v.length?mean(v):NaN; });
+    g+=`<path d="${m.map((v,i)=>Number.isFinite(v)?`${i&&Number.isFinite(m[i-1])?'L':'M'}${Pl.sx(i)},${Pl.sy(v)}`:'').join('')}" style="stroke:${PAL[k%PAL.length]};stroke-width:3.5;fill:none"/>`;
+    m.forEach((v,i)=>{ if (Number.isFinite(v)) g+=`<circle cx="${Pl.sx(i)}" cy="${Pl.sy(v)}" r="4.5" style="fill:${PAL[k%PAL.length]};stroke:var(--panel);stroke-width:1.2"><title>${esc(G||'All')} mean at ${esc(cats[i])}: ${f(v)}</title></circle>`; }); });
+  return Pl.wrap(g);
+}
+
 function niceTicks(min,max,count=5){
   if (!(max>min)){ min-=1; max+=1; }
   const step0=(max-min)/count, mag=10**Math.floor(Math.log10(step0)), e=step0/mag;
@@ -838,7 +946,8 @@ function niceTicks(min,max,count=5){
   return {lo,hi,ticks};
 }
 const tickFmt = t => Math.abs(t)>=1e5 ? t.toExponential(1) : String(+t.toPrecision(6));
-function makePlot({xmin,xmax,ymin,ymax,xlab='',ylab='',title='',cats=null,legend=null,w=600,h=360}){
+function makePlot({xmin,xmax,ymin,ymax,xlab='',ylab='',title='',cats=null,legend=null,w=SIZES[CHART.size][0],h=SIZES[CHART.size][1],ylo,yhi}){
+  if (ylo!=null&&Number.isFinite(ylo)) ymin=ylo; if (yhi!=null&&Number.isFinite(yhi)) ymax=yhi;
   const rot = cats && cats.length>6;
   const m={l:58,r:18,t:(title?30:14)+(legend?20:0),b:rot?78:46};
   const X = cats ? null : niceTicks(xmin,xmax), Y=niceTicks(ymin,ymax);
@@ -1077,7 +1186,7 @@ function clusteredBarSVG(cats, groups, vals, {ylab='Percentage (%)',title}={}){ 
   return Pl.wrap(g);
 }
 function boxGroupedSVG(cats, groups, data, {ylab,xlab,title}={}){ // data[c][g] arrays
-  const all=data.flat(2); const Pl=makePlot({ymin:Math.min(...all),ymax:Math.max(...all),cats,ylab,xlab,title,legend:groups});
+  const all=data.flat(2); const Pl=makePlot({ymin:Math.min(...all),ymax:Math.max(...all),cats,ylab,xlab,title,legend:groups.length>1?groups:null});
   const slot=Pl.pw/cats.length*0.8, bw=slot/groups.length*0.75; let g='';
   cats.forEach((c,i)=>groups.forEach((G,k)=>{ const a=data[i][k]; if (!a||!a.length) return; const b=boxStat(a), col=PAL[k%PAL.length], x=Pl.sx(i)-slot/2+(k+0.5)*slot/groups.length;
     g+=`<path d="M${x},${Pl.sy(b.lo)}V${Pl.sy(b.q1)}M${x},${Pl.sy(b.q3)}V${Pl.sy(b.hi)}M${x-bw/4},${Pl.sy(b.lo)}H${x+bw/4}M${x-bw/4},${Pl.sy(b.hi)}H${x+bw/4}" style="stroke:${col};stroke-width:1.5;fill:none"/>`;
@@ -1261,16 +1370,16 @@ function forestSVG(st, M, {ratio, label, left='Lower in treatment group', right=
   g+=`<text x="8" y="${yb+54}">Heterogeneity: Q = ${f(M.Q,2)}, df = ${M.df}, p ${fp(M.pQ)}; I² = ${f(100*M.I2,1)}%, τ² = ${f(M.tau2,3)}</text>`;
   return `<svg class="plot" viewBox="0 0 ${W} ${H}" role="img" style="max-width:900px">${g}</svg>`;
 }
-function barChartSVG(cats, series, {ylab,xlab,title,values=false}={}){ // series: [{name, vals, lo?, hi?}]
+function barChartSVG(cats, series, {ylab,xlab,title,values=false,ylo,yhi,extra}={}){ // series: [{name, vals, lo?, hi?}]
   const all=series.flatMap(s=>[...s.vals,...(s.hi||[]),...(s.lo||[])]).filter(Number.isFinite);
-  const Pl=makePlot({ymin:Math.min(0,...all),ymax:Math.max(...all)*(values?1.08:1),cats,ylab,xlab,title,legend:series.length>1?series.map(s=>s.name):null});
+  const Pl=makePlot({ymin:Math.min(0,...all),ymax:Math.max(...all)*(values?1.08:1),cats,ylab,xlab,title,legend:series.length>1?series.map(s=>s.name):null,ylo,yhi});
   const slot=Pl.pw/cats.length*0.75, bw=slot/series.length; let g='';
   cats.forEach((c,i)=>series.forEach((s,k)=>{ const v=s.vals[i]; if (!Number.isFinite(v)) return; const x=Pl.sx(i)-slot/2+k*bw, col=series.length>1?PAL[k%PAL.length]:PAL[i%PAL.length], y0=Pl.sy(0), y=Pl.sy(v);
     g+=`<rect x="${x+1.5}" y="${Math.min(y,y0)}" width="${Math.max(1,bw-3)}" height="${Math.abs(y0-y)}" rx="2" style="fill:${col};opacity:.9"><title>${esc(s.name?s.name+', ':'')}${esc(c)}: ${f(v,2)}</title></rect>`;
     const xc=x+bw/2;
     if (s.lo && Number.isFinite(s.lo[i])){ const a=Pl.sy(s.hi[i]), b=Pl.sy(s.lo[i]); g+=`<path d="M${xc},${a}V${b}M${xc-6},${a}H${xc+6}M${xc-6},${b}H${xc+6}" style="stroke:var(--text);stroke-width:1.3;fill:none"/>`; }
     if (values) g+=`<text x="${xc}" y="${Math.min(y, s.hi&&Number.isFinite(s.hi[i])?Pl.sy(s.hi[i]):y)-5}" text-anchor="middle" style="fill:var(--text)">${f(v,v>=100?0:v>=10?1:2)}</text>`; }));
-  return Pl.wrap(g);
+  return Pl.wrap(g+(extra?extra(Pl):''));
 }
 function pieSVG(labels, counts, {title}={}){
   const W=600, H=360, cx=200, cy=H/2+10, r=130, tot=sum(counts); let a0=-Math.PI/2, g=title?`<text class="ttl" x="20" y="22">${esc(title)}</text>`:'';
@@ -1297,6 +1406,68 @@ function metaReport(st,{ratio,label,random,drop=[]}){
   return out+`<div class="plots one">${forestSVG(st,M,{ratio,label,random})}</div><div class="plots">${fun}</div>`
     + note(`${M.k} studies. ${ratio?'Analyses were performed on the log scale and back-transformed.':''} Funnel axes on the analysis scale; Egger's test needs ≥ 10 studies to be reliable.`)
     + report(`${random?'Random-effects':'Fixed-effect'} pooled ${label} = ${fm(R.est)} (95% CI ${fm(R.lo)}–${fm(R.hi)}), p ${pAPA(R.p)}; I² = ${f(100*M.I2,0)}%`);
+}
+function rmPost(M, vars, method, kind){ // pairwise comparisons for repeated measures (t = paired t, w = Wilcoxon)
+  const k=vars.length, n=M.length, prs=[];
+  for (let a=0;a<k;a++) for (let b=a+1;b<k;b++) if (method!=='base'||a===0) prs.push([a,b]);
+  const rows=[], ps=prs.map(([a,b])=>{ const x=M.map(r=>r[a]), y=M.map(r=>r[b]);
+    if (kind==='t'){ const d=x.map((v,i)=>v-y[i]), s=summary(d), t=s.mean/s.se, p=pT(t,n-1,'two'); rows.push([`${cname(vars[b])} − ${cname(vars[a])}`,f(-s.mean),f(s.se),f(-t),f(s.mean/s.sd*-1)]); return p; }
+    const p=wilcoxP(y,x); rows.push([`${cname(vars[b])} − ${cname(vars[a])}`,f(median(y.map((v,i)=>v-x[i]))),'','','']); return p; });
+  const adj=method==='holm'?holm(ps):ps.map(p=>Math.min(1,p*ps.length));
+  const lab=method==='holm'?'Holm':'Bonferroni';
+  return h5(`Post hoc: ${kind==='t'?'paired t-tests':'Wilcoxon signed-rank tests'}${method==='base'?' versus the first time point':''} (${lab})`)
+    + table(kind==='t'?['Comparison','Mean difference','SE','t','Cohen\'s dz','p (raw)',`p (${lab})`]:['Comparison','Median difference','p (raw)',`p (${lab})`],
+      rows.map((r,i)=>kind==='t'?[...r,fp(ps[i]),P(adj[i])]:[r[0],r[1],fp(ps[i]),P(adj[i])]));
+}
+function wilcoxP(x,y){
+  const d=x.map((v,i)=>v-y[i]).filter(v=>v!==0), n=d.length; if (n<1) return 1;
+  const {r,T}=rank(d.map(Math.abs)); let Wp=0; d.forEach((v,i)=>{ if (v>0) Wp+=r[i]; });
+  if (T===0&&n<=50) return exactP(signedRankExactDist(n),Wp,'two');
+  const mu=n*(n+1)/4, sg=Math.sqrt(n*(n+1)*(2*n+1)/24-T/48); return sg>0?pZ((Wp-mu-Math.sign(Wp-mu)*0.5)/sg,'two'):1;
+}
+function lmmFit(y, X, sub){ // linear mixed model with a random intercept per subject, REML
+  const N=y.length, p=X[0].length, groups=new Map(); sub.forEach((s,i)=>{ if (!groups.has(s)) groups.set(s,[]); groups.get(s).push(i); });
+  const G=[...groups.values()];
+  const calc=lam=>{ const A=Array.from({length:p},()=>new Array(p).fill(0)), bv=new Array(p).fill(0); let yy=0, ld=0;
+    for (const R of G){ const n=R.length, c=lam/(1+n*lam), sx=new Array(p).fill(0); let sy=0;
+      for (const i of R){ const x=X[i]; sy+=y[i]; yy+=y[i]*y[i]; for (let a=0;a<p;a++){ sx[a]+=x[a]; bv[a]+=x[a]*y[i]; for (let b=0;b<p;b++) A[a][b]+=x[a]*x[b]; } }
+      yy-=c*sy*sy; for (let a=0;a<p;a++){ bv[a]-=c*sx[a]*sy; for (let b=0;b<p;b++) A[a][b]-=c*sx[a]*sx[b]; } ld+=Math.log(1+n*lam); }
+    const inv=matInv(A); if (!inv) return null; const b=inv.map(r=>r.reduce((s,v,j)=>s+v*bv[j],0)), Q=yy-b.reduce((s,v,j)=>s+v*bv[j],0), dA=det(A);
+    return {reml:-0.5*((N-p)*Math.log(Q/(N-p))+ld+Math.log(dA)), b, inv, Q}; };
+  let lo=-14, hi=8; const fn=t=>{ const r=calc(Math.exp(t)); return r?r.reml:-Infinity; };
+  const gr=(Math.sqrt(5)-1)/2; let c=hi-gr*(hi-lo), d=lo+gr*(hi-lo), fc=fn(c), fd=fn(d);
+  for (let it=0; it<80; it++){ if (fc>fd){ hi=d; d=c; fd=fc; c=hi-gr*(hi-lo); fc=fn(c); } else { lo=c; c=d; fc=fd; d=lo+gr*(hi-lo); fd=fn(d); } }
+  let lam=Math.exp((lo+hi)/2), best=calc(lam); const z0=calc(0); if (z0 && z0.reml>best.reml){ best=z0; lam=0; }
+  const s2e=best.Q/(N-p);
+  return {b:best.b, cov:best.inv.map(r=>r.map(v=>v*s2e)), s2e, s2u:lam*s2e, reml:best.reml-0.5*(N-p)-0.5*(N-p)*Math.log(2*Math.PI), nSub:G.length, N, sizes:G.map(R=>R.length)};
+}
+function openRestructure(){
+  need2();
+  const opt=(list,sel)=>list.map(([j,c])=>`<option value="${j}"${j===sel?' selected':''}>${esc(c)}</option>`).join(''), all=D.cols.map((c,j)=>[j,c]);
+  openDialog('Restructure data (wide ↔ long)', `<label class="f">Direction<select name="dir"><option value="w2l">Wide → long (one row per subject per time point)</option><option value="l2w">Long → wide (one row per subject)</option></select></label>
+    <div id="w2l"><fieldset><legend>Columns to stack (e.g. the time points)</legend><div class="checks">${all.map(([j,c])=>`<label class="ck"><input type="checkbox" name="stack" value="${j}">${esc(c)}</label>`).join('')}</div></fieldset>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px"><label class="f">Name for the time column<input name="tname" value="time"></label><label class="f">Name for the value column<input name="vname" value="value"></label></div>
+      <span class="hint">All other columns are copied to every new row. A subject id column is added if none exists.</span></div>
+    <div id="l2w" hidden><label class="f">Subject id column<select name="id">${opt(all,0)}</select></label><label class="f">Time column<select name="tc">${opt(all,1)}</select></label><label class="f">Value column<select name="vc">${opt(all,2)}</select></label>
+      <span class="hint">New columns are named value_time (e.g. score_week4). Other columns keep the value from each subject’s first row.</span></div>`, 'Restructure', ()=>{
+    const F=$('#dlgForm');
+    if (F.elements.dir.value==='w2l'){
+      const st=[...F.querySelectorAll('input[name=stack]:checked')].map(e=>+e.value); need(st.length>=2,'Select at least 2 columns to stack.');
+      const keep=D.cols.map((_,j)=>j).filter(j=>!st.includes(j)), hasId=keep.some(j=>/^(id|subject|patient|case)/i.test(D.cols[j]));
+      const cols=[...(hasId?[]:['subject_id']),...keep.map(j=>D.cols[j]),F.elements.tname.value.trim()||'time',F.elements.vname.value.trim()||'value'];
+      const rows=[]; D.rows.forEach((r,i)=>st.forEach(j=>rows.push([...(hasId?[]:[String(i+1)]),...keep.map(k=>r[k]),D.cols[j],r[j]])));
+      snap(); D={cols:cols.map((c,i)=>cols.indexOf(c)===i?c:c+'_'+i), rows}; dataChanged(true);
+    } else {
+      const id=+F.elements.id.value, tc=+F.elements.tc.value, vc=+F.elements.vc.value; need(new Set([id,tc,vc]).size===3,'Choose three different columns.');
+      const times=[...new Set(D.rows.map(r=>String(r[tc]).trim()).filter(v=>v!==''))]; need(times.length>=2&&times.length<=200,'The time column needs 2–200 distinct values.');
+      const other=D.cols.map((_,j)=>j).filter(j=>![id,tc,vc].includes(j)), subj=new Map();
+      D.rows.forEach(r=>{ const k=String(r[id]).trim(); if (!subj.has(k)) subj.set(k,{first:r, vals:{}}); subj.get(k).vals[String(r[tc]).trim()]=r[vc]; });
+      const base=D.cols[vc], cols=[D.cols[id],...other.map(j=>D.cols[j]),...times.map(t=>`${base}_${t}`)];
+      const rows=[...subj].map(([k,s])=>[k,...other.map(j=>s.first[j]),...times.map(t=>s.vals[t]??'')]);
+      snap(); D={cols, rows}; dataChanged(true);
+    }
+  });
+  const dir=$('#dlgForm').elements.dir; dir.onchange=()=>{ $('#w2l').hidden=dir.value!=='w2l'; $('#l2w').hidden=dir.value!=='l2w'; };
 }
 function buildDesign(rows, xs, ok){ // dummy-codes text predictors (first level = reference)
   const isN=xs.map(colIsNum), S=xs.map((j,k)=>rows.map(r=>isN[k]?toNum(r[j]):(isMiss(r[j])?null:String(r[j]).trim())));
@@ -1627,8 +1798,8 @@ anova2:{ g:'Compare means', name:'Two-way ANOVA',
     return out+`<div class="plots">${meansSVG(la,lb.map(b=>({name:b,pts:la.map(a=>meanCI(cell(a,b)))})),{ylab:D.cols[o.y],xlab:D.cols[o.a],title:'Interaction plot (means ± 95% CI)'})}</div>`
       + note('Type III sums of squares with sum-to-zero (effect) coding; suitable for unbalanced designs.') + report(rep.join('; '));
   }},
-rmanova:{ g:'Compare means', name:'Repeated-measures ANOVA',
-  fields:[{k:'vars',t:'nums',label:'Conditions (one column per measurement, ≥ 2)'},{k:'post',t:'check',label:'Pairwise paired t-tests (Holm-adjusted)',def:true}],
+rmanova:{ g:'Repeated measures', name:'Repeated-measures ANOVA',
+  fields:[{k:'vars',t:'nums',label:'Conditions (one column per measurement, ≥ 2)'},{k:'post',t:'select',label:'Post hoc comparisons (paired t-tests)',options:[['holm','All pairs, Holm-adjusted'],['bonf','All pairs, Bonferroni-adjusted'],['base','Each time point vs the first (Bonferroni)'],['none','None']]}],
   run(o){
     need(o.vars.length>=2,'Select at least 2 columns.');
     const C=o.vars.map(numCol), k=C.length, M=C[0].map((_,i)=>C.map(c=>c[i])).filter(r=>r.every(Number.isFinite)), n=M.length;
@@ -1652,19 +1823,14 @@ rmanova:{ g:'Compare means', name:'Repeated-measures ANOVA',
       out+=table(["Mauchly's W",'χ²','df','p'],[[f(W),f(chi),df,P(pm)]]);
       if (pm<0.05) out+=warn('Sphericity is violated (Mauchly p < .05) — use the Greenhouse–Geisser (ε < .75) or Huynh–Feldt corrected results.');
     }
-    if (o.post && k>2){
-      const pr=[], ps=[];
-      for (let a=0;a<k;a++) for (let b=a+1;b<k;b++){ const d=M.map(r=>r[a]-r[b]), s=summary(d), t=s.mean/s.se, p=pT(t,n-1,'two'); ps.push(p); pr.push([`${cname(o.vars[a])} − ${cname(o.vars[b])}`,f(s.mean),f(s.se),f(t),n-1,fp(p)]); }
-      holm(ps).forEach((p,i)=>pr[i].push(P(p)));
-      out+=h5('Pairwise comparisons')+table(['Comparison','Mean diff.','SE','t','df','p (raw)','p (Holm)'],pr);
-    }
+    if (o.post && o.post!=='none' && k>2) out+=rmPost(M,o.vars,o.post,'t');
     const best=gg<1?['Greenhouse–Geisser',gg]:['',1];
     return out+`<div class="plots">${meansSVG(o.vars.map(j=>D.cols[j]),[{name:'',pts:o.vars.map((_,c)=>meanCI(M.map(r=>r[c])))}],{title:'Means ± 95% CI'})}</div>`
       + note(`${AR().length-n} rows with missing values excluded (listwise).`)
       + report(`${best[0]?best[0]+'-corrected ':''}F(${f(dfc*best[1],2)}, ${f(dfe*best[1],2)}) = ${f(F,2)}, p ${pAPA(fUpper(F,dfc*best[1],dfe*best[1]))}, partial η² = ${f(ssc/(ssc+sse),2)}`);
   }},
-friedman:{ g:'Nonparametric', name:'Friedman test',
-  fields:[{k:'vars',t:'nums',label:'Conditions (one column per measurement, ≥ 2)'}],
+friedman:{ g:'Repeated measures', name:'Friedman test',
+  fields:[{k:'vars',t:'nums',label:'Conditions (one column per measurement, ≥ 2)'},{k:'post',t:'select',label:'Post hoc comparisons (Wilcoxon signed-rank)',options:[['holm','All pairs, Holm-adjusted'],['bonf','All pairs, Bonferroni-adjusted'],['base','Each time point vs the first (Bonferroni)'],['none','None']]}],
   run(o){
     need(o.vars.length>=2,'Select at least 2 columns.');
     const C=o.vars.map(numCol), k=C.length, M=C[0].map((_,i)=>C.map(c=>c[i])).filter(r=>r.every(Number.isFinite)), n=M.length;
@@ -1673,6 +1839,8 @@ friedman:{ g:'Nonparametric', name:'Friedman test',
     const Q=(12*sum(Rj.map(v=>v*v))-3*n*n*k*(k+1)**2)/(n*k*(k+1)-T/(k-1)), df=k-1, p=chiUpper(Q,df);
     return table(['Condition','N','Median','Mean rank'],o.vars.map((j,c)=>[cname(j),n,f(median(M.map(r=>r[c]))),f(Rj[c]/n,2)]))
       + table(['χ²','df','p',"Kendall's W"],[[f(Q),df,P(p),f(Q/(n*(k-1)))]])
+      + (o.post&&o.post!=='none'&&k>2 ? rmPost(M,o.vars,o.post,'w') : '')
+      + `<div class="plots">${boxGroupedSVG(o.vars.map(j=>D.cols[j]),[''],o.vars.map((_,c)=>[M.map(r=>r[c])]),{title:'Distribution at each time point'})}</div>`
       + note(`Ranks are computed within each case (tie-corrected). ${AR().length-n} rows with missing values excluded.`)
       + report(`χ²<sub>F</sub>(${df}) = ${f(Q,2)}, p ${pAPA(p)}, W = ${f(Q/(n*(k-1)),2)}`);
   }},
@@ -2202,8 +2370,8 @@ table1:{ g:'Reports', name:'Group comparison table', report:true,
     }
     return out;
   }},
-mixed:{ g:'Compare means', name:'Mixed ANOVA (group × time)',
-  fields:[{k:'g',t:'col',label:'Between-subjects factor (group)',prefCat:true},{k:'vars',t:'nums',label:'Repeated measurements (one column per time point, ≥ 2)'},{k:'post',t:'check',label:'Compare groups at each time point (Bonferroni)',def:true}],
+mixed:{ g:'Repeated measures', name:'Mixed ANOVA (group × time)',
+  fields:[{k:'g',t:'col',label:'Between-subjects factor (group)',prefCat:true},{k:'vars',t:'nums',label:'Repeated measurements (one column per time point, ≥ 2)'},{k:'post',t:'check',label:'Compare groups at each time point (Bonferroni)',def:true},{k:'within',t:'check',label:'Within each group: change over time and vs baseline (Bonferroni)',def:true}],
   run(o){
     need(o.vars.length>=2,'Select at least 2 time-point columns.');
     const G=strCol(o.g), C=o.vars.map(numCol), k=C.length;
@@ -2227,9 +2395,23 @@ mixed:{ g:'Compare means', name:'Mixed ANOVA (group × time)',
     let out=h5('Descriptives (mean ± SD)')+table([cname(o.g),'N',...o.vars.map(cname)],lv.map((L,g)=>[esc(L),M[g].length,...o.vars.map((_,t)=>{ const v=M[g].map(r=>r[t]); return `${f(mean(v),2)} ± ${f(sd(v),2)}`; })]))
       + h5('ANOVA (sphericity assumed)')+table(['Source','Sum of squares','df','Mean square','F','p','Partial η²'],rows);
     if (k>2){ const pT_=fUpper(Ft,dft*gg,dfew*gg), pI=fUpper(Fi,dfi*gg,dfew*gg);
-      out+=h5(`Greenhouse–Geisser corrected within-subject effects (ε = ${f(gg)})`)+table(['Source','df','Error df','F','p'],[[tl,f(dft*gg,2),f(dfew*gg,2),f(Ft),P(pT_)],[il,f(dfi*gg,2),f(dfew*gg,2),f(Fi),P(pI)]]); }
+      const hf=Math.min(1,(N*(k-1)*gg-2)/((k-1)*(N-a-(k-1)*gg))), q=k-1;
+      const H=[...Array(k)].map((_,i)=>[...Array(q)].map((_,j)=>{ const zz=Math.sqrt((j+1)*(j+2)); return i<=j?1/zz:i===j+1?-(j+1)/zz:0; }));
+      const Sg=[...Array(q)].map((_,x)=>[...Array(q)].map((_,y)=>{ let s=0; for (let i=0;i<k;i++) for (let j=0;j<k;j++) s+=H[i][x]*Sp[i][j]*H[j][y]; return s; }));
+      const W=det(Sg)/(sum(Sg.map((r,i)=>r[i]))/q)**q, mchi=-((N-a)-(2*q*q+q+2)/(6*q))*Math.log(W), mdf=q*(q+1)/2-1, mp=chiUpper(mchi,mdf);
+      out+=table(["Mauchly's W",'χ²','df','p'],[[f(W),f(mchi),mdf,P(mp)]]);
+      out+=h5('Corrected within-subject effects')+table(['Source','Correction','ε','df','Error df','F','p'],[
+        [tl,'Greenhouse–Geisser',f(gg),f(dft*gg,2),f(dfew*gg,2),f(Ft),P(pT_)],[tl,'Huynh–Feldt',f(hf),f(dft*hf,2),f(dfew*hf,2),f(Ft),P(fUpper(Ft,dft*hf,dfew*hf))],
+        [il,'Greenhouse–Geisser',f(gg),f(dfi*gg,2),f(dfew*gg,2),f(Fi),P(pI)],[il,'Huynh–Feldt',f(hf),f(dfi*hf,2),f(dfew*hf,2),f(Fi),P(fUpper(Fi,dfi*hf,dfew*hf))]]);
+      if (mp<0.05) out+=warn('Sphericity is violated (Mauchly p < .05): report the Greenhouse–Geisser (or Huynh–Feldt) corrected within-subject tests.'); }
     if (o.post){ const pr=o.vars.map((j,t)=>{ const arrs=M.map(m=>m.map(r=>r[t])); const p=a===2?studentP(arrs[0],arrs[1]):anova1(arrs).p; return [cname(j),...arrs.map(v=>`${f(mean(v),2)} ± ${f(sd(v),2)}`),fp(p),P(Math.min(1,p*k))]; });
       out+=h5(`Group comparison at each time point (${a===2?'t-test':'one-way ANOVA'})`)+table(['Time point',...lv.map(esc),'p','p (Bonferroni)'],pr); }
+    if (o.within){ const rows=[];
+      lv.forEach((L,g)=>{ const pAll=k>2?rmAnovaP(M[g]):studentP(M[g].map(r=>r[1]),M[g].map(r=>r[0]));
+        rows.push([`<b>${esc(L)}</b>`,'Overall change across time points','','',P(pAll)]);
+        o.vars.slice(1).forEach((j,t1)=>{ const t=t1+1, d=M[g].map(r=>r[t]-r[0]), s=summary(d), tt=s.mean/s.se, p=Math.min(1,(k-1)*pT(tt,s.n-1,'two'));
+          rows.push(['',`${cname(j)} − ${cname(o.vars[0])}`,f(s.mean,2),f(tt),P(p)]); }); });
+      out+=h5('Within-group changes over time')+table([cname(o.g),'Comparison','Mean change','t','p'],rows)+note(`Overall p: repeated-measures ANOVA within each group${k>2?' (Greenhouse–Geisser corrected)':''}; changes from baseline: paired t-tests, Bonferroni-adjusted (× ${k-1}).`); }
     const pi=fUpper(Fi,dfi*(k>2?gg:1),dfew*(k>2?gg:1));
     if (pi<0.05) out+=warn('The group × time interaction is significant: the groups change differently over time, so interpret main effects with care.');
     return out+`<div class="plots">${meansSVG(o.vars.map(j=>D.cols[j]),lv.map((L,g)=>({name:L,pts:o.vars.map((_,t)=>meanCI(M[g].map(r=>r[t])))})),{title:'Means over time (± 95% CI)'})}</div>`
@@ -2315,32 +2497,60 @@ missing:{ g:'Describe', name:'Missing data summary',
       + note('To fill in missing values, use Data → Missing… (mean, median, mode or a constant), or analyse complete cases.');
   }},
 chart:{ g:'Graphs', name:'Chart builder',
-  fields:[{k:'type',t:'select',label:'Chart type',options:[['barmean','Bar chart of means (with error bars)'],['barpct','Bar chart of percentages'],['pie','Pie chart'],['line','Line chart of means over several variables (e.g. time points)'],['barcount','Bar chart of counts']]},
-    {k:'y',t:'num',label:'Value variable (bar of means)'},{k:'x',t:'col',label:'Category / x-axis variable',prefCat:true},{k:'g',t:'col',label:'Cluster by (optional; separate bars or lines)',optional:true},
-    {k:'vars',t:'nums',label:'Variables for the line chart (in order)'},
+  fields:[{k:'type',t:'select',label:'Chart type',options:[['barmean','Bar chart of means (error bars)'],['dot','Dot plot of means ± error (no bars)'],['boxdots','Box plot with individual data points'],['violin','Violin plot'],['barpct','Bar chart of percentages'],['stack100','100% stacked bar chart'],['barcount','Bar chart of counts'],['pie','Pie chart'],['histg','Histograms by group (overlaid)'],['line','Line chart of means over time points'],['spaghetti','Individual trajectories over time (spaghetti plot)'],['heatmap','Correlation heatmap']]},
+    {k:'y',t:'num',label:'Value variable (means, box, violin, dot, histogram)'},{k:'x',t:'col',label:'Category / x-axis variable',prefCat:true},{k:'g',t:'col',label:'Cluster / colour by (optional — segments for stacked bars)',optional:true},
+    {k:'vars',t:'nums',label:'Variables for line, spaghetti and heatmap charts (in order)'},
     {k:'err',t:'select',label:'Error bars',options:[['sd','± 1 SD'],['se','± 1 SE'],['ci','95% CI'],['none','None']]},
-    {k:'title',t:'text',label:'Chart title (optional)'},{k:'xlab',t:'text',label:'X-axis label (optional)'},{k:'ylab',t:'text',label:'Y-axis label (optional)'},{k:'values',t:'check',label:'Show values on bars',def:true}],
+    {k:'sig',t:'check',label:'Add significance brackets between x-axis groups (bar, dot, box, violin; no clustering)'},
+    {k:'test',t:'select',label:'Test for brackets (Bonferroni-adjusted)',options:[['param',"Student's t-test"],['np','Mann–Whitney U test']]},
+    {k:'title',t:'text',label:'Chart title (optional)'},{k:'xlab',t:'text',label:'X-axis label (optional)'},{k:'ylab',t:'text',label:'Y-axis label (optional)'},
+    {k:'ymin',t:'number',label:'Y-axis minimum (optional)'},{k:'ymax',t:'number',label:'Y-axis maximum (optional)'},
+    {k:'values',t:'check',label:'Show values on bars',def:true}],
   run(o){
-    const E=(a)=>{ if (a.length<1) return [NaN,NaN]; const m=mean(a); if (o.err==='none'||a.length<2) return [NaN,NaN]; const s=sd(a), h=o.err==='sd'?s:o.err==='se'?s/Math.sqrt(a.length):tinv(0.975,a.length-1)*s/Math.sqrt(a.length); return [m-h,m+h]; };
+    const E=a=>{ if (a.length<2||o.err==='none') return [NaN,NaN]; const m=mean(a), s=sd(a), h=o.err==='sd'?s:o.err==='se'?s/Math.sqrt(a.length):tinv(0.975,a.length-1)*s/Math.sqrt(a.length); return [m-h,m+h]; };
+    const errLab={sd:'mean ± SD',se:'mean ± SE',ci:'mean ± 95% CI',none:'mean'}[o.err], ylo=o.ymin??undefined, T=o.type;
     const G=o.g>=0?strCol(o.g):null, gl=G?sortLevels([...new Set(G.filter(v=>v!=null))]):[null];
-    const errLab={sd:'mean ± SD',se:'mean ± SE',ci:'mean ± 95% CI',none:'mean'}[o.err];
-    if (o.type==='line'){
-      need(o.vars.length>=2,'Select at least 2 variables for the line chart.');
-      const C=o.vars.map(numCol);
+    if (T==='heatmap'){ need(o.vars.length>=2,'Select at least 2 variables.'); const R=o.vars.map(a=>o.vars.map(b=>{ if (a===b) return 1; const [x,y]=pairs(a,b); return x.length>2?pearson(x,y):NaN; }));
+      return `<div class="plots one">${heatmapSVG(o.vars.map(j=>D.cols[j]),R,{title:o.title||'Correlation heatmap (Pearson r)'})}</div>`; }
+    if (T==='line'||T==='spaghetti'){
+      need(o.vars.length>=2,'Select at least 2 time-point variables.'); const C=o.vars.map(numCol), cats=o.vars.map(j=>D.cols[j]);
+      if (T==='spaghetti'){ const subs=C[0].map((_,i)=>({vals:C.map(c=>c[i]), g:G?G[i]:null})).filter(s=>s.vals.some(Number.isFinite)&&(!G||s.g!=null));
+        return `<div class="plots one">${spaghettiSVG(cats,subs,gl,{title:o.title||`Individual trajectories (n = ${subs.length}) with group means`,ylab:o.ylab||''})}</div>`; }
       const series=gl.map(L=>({name:L??'', pts:C.map(c=>{ const a=c.filter((v,i)=>Number.isFinite(v)&&(!G||G[i]===L)); if (!a.length) return null; const [lo,hi]=E(a); return {m:mean(a),lo,hi}; })}));
-      return `<div class="plots">${meansSVG(o.vars.map(j=>D.cols[j]),series,{title:o.title||`Means over ${o.vars.length} variables (${errLab})`,ylab:o.ylab||'',xlab:o.xlab||''})}</div>`;
+      return `<div class="plots">${meansSVG(cats,series,{title:o.title||`Means over time (${errLab})`,ylab:o.ylab||'',xlab:o.xlab||''})}</div>`;
     }
     const X=strCol(o.x), xl=sortLevels([...new Set(X.filter(v=>v!=null))]); need(xl.length>=1&&xl.length<=40,'The category variable needs 1–40 categories.');
-    if (o.type==='pie'){ const c=xl.map(L=>X.filter(v=>v===L).length); return `<div class="plots">${pieSVG(xl,c,{title:o.title||`${D.cols[o.x]}`})}</div>`; }
-    if (o.type==='barmean'){
-      const Y=numCol(o.y), series=gl.map(L=>{ const ar=xl.map(c=>Y.filter((v,i)=>Number.isFinite(v)&&X[i]===c&&(!G||G[i]===L))); const ee=ar.map(E);
-        return {name:L??'', vals:ar.map(a=>a.length?mean(a):NaN), lo:ee.map(e=>e[0]), hi:ee.map(e=>e[1]), n:ar.map(a=>a.length)}; });
-      const tb=table([cname(o.x),...(G?[cname(o.g)]:[]),'N','Mean',o.err==='none'?'':`${{sd:'SD range',se:'SE range',ci:'95% CI'}[o.err]}`],series.flatMap(s=>xl.map((c,i)=>[esc(c),...(G?[esc(s.name)]:[]),s.n[i],f(s.vals[i]),o.err==='none'?'':ci([s.lo[i],s.hi[i]])])));
-      return `<div class="plots">${barChartSVG(xl,series,{title:o.title||`${D.cols[o.y]} by ${D.cols[o.x]} (${errLab})`,ylab:o.ylab||D.cols[o.y],xlab:o.xlab||D.cols[o.x],values:o.values})}</div>`+tb;
-    }
-    const pct=o.type==='barpct', series=gl.map(L=>{ const inG=i=>!G||G[i]===L, tot=X.filter((v,i)=>v!=null&&inG(i)).length;
-      return {name:L??'', vals:xl.map(c=>{ const n=X.filter((v,i)=>v===c&&inG(i)).length; return pct?(tot?100*n/tot:0):n; })}; });
-    return `<div class="plots">${barChartSVG(xl,series,{title:o.title||`${D.cols[o.x]}${G?' by '+D.cols[o.g]:''}`,ylab:o.ylab||(pct?(G?`% within ${D.cols[o.g]}`:'Percentage (%)'):'Count'),xlab:o.xlab||D.cols[o.x],values:o.values})}</div>`;
+    if (T==='pie'){ const c=xl.map(L=>X.filter(v=>v===L).length); return `<div class="plots">${pieSVG(xl,c,{title:o.title||D.cols[o.x]})}</div>`; }
+    if (T==='stack100'){ need(G,'Choose a "Cluster / colour by" variable for the stacked segments.');
+      const pct=xl.map(c=>{ const n=X.filter((v,i)=>v===c&&G[i]!=null).length; return gl.map(L=>n?100*X.filter((v,i)=>v===c&&G[i]===L).length/n:0); });
+      return `<div class="plots">${stack100SVG(xl,gl,pct,{xlab:o.xlab||D.cols[o.x],title:o.title||`${D.cols[o.g]} within ${D.cols[o.x]}`})}</div>`
+        + table([cname(o.x),...gl.map(esc)],xl.map((c,i)=>[esc(c),...pct[i].map(v=>f(v,1)+'%')])); }
+    if (T==='barpct'||T==='barcount'){ const pct=T==='barpct', series=gl.map(L=>{ const inG=i=>!G||G[i]===L, tot=X.filter((v,i)=>v!=null&&inG(i)).length;
+        return {name:L??'', vals:xl.map(c=>{ const n=X.filter((v,i)=>v===c&&inG(i)).length; return pct?(tot?100*n/tot:0):n; })}; });
+      return `<div class="plots">${barChartSVG(xl,series,{title:o.title||`${D.cols[o.x]}${G?' by '+D.cols[o.g]:''}`,ylab:o.ylab||(pct?(G?`% within ${D.cols[o.g]}`:'Percentage (%)'):'Count'),xlab:o.xlab||D.cols[o.x],values:o.values,ylo,yhi:o.ymax??undefined})}</div>`; }
+    // numeric-by-category charts
+    const Y=numCol(o.y), arr=(c,L)=>Y.filter((v,i)=>Number.isFinite(v)&&X[i]===c&&(!G||G[i]===L));
+    if (T==='histg'){ const grp=xl.map(c=>[c,Y.filter((v,i)=>Number.isFinite(v)&&X[i]===c)]).filter(g=>g[1].length); need(grp.length<=8,'At most 8 groups for overlaid histograms.');
+      return `<div class="plots">${histGroupSVG(grp,{xlab:o.xlab||D.cols[o.y],title:o.title||`${D.cols[o.y]} by ${D.cols[o.x]}`})}</div>`; }
+    const useSig=o.sig&&!G&&xl.length>=2&&xl.length<=8, grpArr=xl.map(c=>arr(c,null));
+    const pairsS=useSig?sigPairs(grpArr,o.test):[];
+    let top=-Infinity, bot=Infinity;
+    if (T==='barmean'||T==='dot'){ grpArr.forEach(a=>{ if (!a.length) return; const [lo,hi]=E(a); top=Math.max(top,Number.isFinite(hi)?hi:mean(a)); bot=Math.min(bot,Number.isFinite(lo)?lo:mean(a)); }); if (T==='barmean') bot=Math.min(bot,0); }
+    else grpArr.forEach(a=>{ if (a.length){ top=Math.max(top,...a); bot=Math.min(bot,...a); } });
+    const step=(top-bot||1)*0.09; if (T==='barmean'&&o.values&&pairsS.length) top+=step*0.9;
+    const yhi=o.ymax??(pairsS.length?top+step*(pairsS.length+0.4):undefined);
+    const extra=pairsS.length?(Pl=>bracketsSVG(Pl,pairsS,i=>Pl.sx(i),top,step)):null;
+    const ttl=o.title||`${D.cols[o.y]} by ${D.cols[o.x]}${T==='barmean'||T==='dot'?` (${errLab})`:''}`, yl=o.ylab||D.cols[o.y], xla=o.xlab||D.cols[o.x];
+    let svg;
+    if (T==='boxdots') svg=boxDotsSVG(xl.map((c,i)=>[c,grpArr[i]]),{ylab:yl,xlab:xla,title:ttl,ylo,yhi,extra});
+    else if (T==='violin') svg=violinSVG(xl.map((c,i)=>[c,grpArr[i]]),{ylab:yl,xlab:xla,title:ttl,ylo,yhi,extra});
+    else { const series=gl.map(L=>{ const ar=xl.map(c=>arr(c,L)), ee=ar.map(E); return {name:L??'', vals:ar.map(a=>a.length?mean(a):NaN), m:ar.map(a=>a.length?mean(a):NaN), lo:ee.map(e=>e[0]), hi:ee.map(e=>e[1]), n:ar.map(a=>a.length)}; });
+      svg = T==='dot' ? dotErrSVG(xl,series,{ylab:yl,xlab:xla,title:ttl,ylo,yhi,extra}) : barChartSVG(xl,series,{title:ttl,ylab:yl,xlab:xla,values:o.values,ylo,yhi,extra}); }
+    let out=`<div class="plots">${svg}</div>`;
+    out+=table([cname(o.x),'N','Mean','SD','Median','IQR'],grpArr.map((a,i)=>{ const s=a.length?summary(a):{n:0}; return [esc(xl[i]),s.n,f(s.mean),f(s.sd),f(s.median),s.n?`${f(s.q1)} – ${f(s.q3)}`:'—']; }));
+    if (pairsS.length) out+=table(['Comparison','p (Bonferroni)','Bracket'],pairsS.map(q=>[`${esc(xl[q.i])} vs ${esc(xl[q.j])}`,P(q.p),stars(q.p)]))+note(`Brackets: ${o.test==='np'?'Mann–Whitney U':"Student's t"} tests, Bonferroni-adjusted. * p < .05, ** p < .01, *** p < .001, ns = not significant.${sigPairs(grpArr,o.test).length<xl.length*(xl.length-1)/2?' With more than 3 comparisons only significant pairs are drawn.':''}`);
+    else if (o.sig&&G) out+=note('Significance brackets are drawn only without a cluster variable.');
+    return out;
   }},
 risk:{ g:'Categorical', name:'Risk measures (RR, OR, NNT)',
   fields:[{k:'x',t:'col',label:'Exposure / treatment variable',prefCat:true},{k:'xe',t:'level',of:'x',label:'Exposed / treated value'},{k:'y',t:'col',label:'Outcome variable',prefCat:true,nth:1},{k:'ye',t:'level',of:'y',label:'Outcome event value'}],
@@ -2462,6 +2672,47 @@ metagen:{ g:'Meta-analysis', name:'Meta-analysis — generic (effect & SE)',
     const L=strCol(o.st), Y=numCol(o.y), S=numCol(o.se), st=[];
     L.forEach((nm,i)=>{ if (Number.isFinite(Y[i])&&S[i]>0) st.push({name:nm??`Study ${i+1}`, y:Y[i], se:S[i]}); });
     return metaReport(st,{ratio:o.scale==='log',label:o.scale==='log'?'Ratio':'Effect',random:o.model==='random'});
+  }},
+lmm:{ g:'Repeated measures', name:'Linear mixed model (handles missing data)',
+  fields:[{k:'vars',t:'nums',label:'Repeated measurements — one column per time point, in order (missing values allowed)'},{k:'g',t:'col',label:'Group (optional)',optional:true},
+    {k:'time',t:'select',label:'Time is treated as',options:[['cat','Categorical — estimate every time point'],['lin','Continuous — linear trend over time']]},
+    {k:'inter',t:'check',label:'Include time × group interaction',def:true},{k:'base',t:'check',label:'Compare each time point with baseline (Bonferroni)',def:true}],
+  run(o){
+    need(o.vars.length>=2,'Select at least 2 time-point columns.');
+    const C=o.vars.map(numCol), k=C.length, Gc=o.g>=0?strCol(o.g):null, obs=[];
+    C[0].forEach((_,i)=>{ if (Gc&&Gc[i]==null) return; C.forEach((c,t)=>{ if (Number.isFinite(c[i])) obs.push({s:i,t,g:Gc?Gc[i]:null,y:c[i]}); }); });
+    const glv=Gc?sortLevels([...new Set(obs.map(q=>q.g))]):[], ng=glv.length, hasG=ng>=2, inter=hasG&&o.inter, lin=o.time==='lin';
+    need(obs.length>k+2,'Not enough observations.'); if (Gc) need(hasG,'The group variable needs at least 2 groups.');
+    const nums=o.vars.map(j=>{ const m=D.cols[j].match(/-?\d+(\.\d+)?/g); return m?+m[m.length-1]:NaN; }), sc=new Set(nums).size===k&&nums.every(Number.isFinite)?nums:o.vars.map((_,t)=>t);
+    const scM=mean(obs.map(q=>sc[q.t]));
+    const tcodes=(t,eff)=>lin?[eff?sc[t]-scM:sc[t]]:[...Array(k-1).keys()].map(c=>eff?(t===c?1:t===k-1?-1:0):(t===c+1?1:0));
+    const gcodes=(g,eff)=>!hasG?[]:[...Array(ng-1).keys()].map(c=>{ const gi=glv.indexOf(g); return eff?(gi===c?1:gi===ng-1?-1:0):(gi===c+1?1:0); });
+    const row=(t,g,eff)=>{ const tc=tcodes(t,eff), gc=gcodes(g,eff); return [1,...tc,...gc,...(inter?tc.flatMap(a=>gc.map(b=>a*b)):[])]; };
+    const tN=lin?1:k-1, gN=hasG?ng-1:0, names=['(Intercept)',...(lin?[`Time (per unit${new Set(nums).size===k&&nums.every(Number.isFinite)?'':' = 1 step'})`]:o.vars.slice(1).map(j=>`${D.cols[j]} vs ${D.cols[o.vars[0]]}`)),...glv.slice(1).map(L=>`${cname(o.g)}: ${esc(L)} vs ${esc(glv[0])}`)];
+    if (inter) (lin?['Time']:o.vars.slice(1).map(j=>D.cols[j])).forEach(t=>glv.slice(1).forEach(L=>names.push(`${esc(t)} × ${esc(L)}`)));
+    const y=obs.map(q=>q.y), sub=obs.map(q=>q.s);
+    const Mr=lmmFit(y,obs.map(q=>row(q.t,q.g,false)),sub), Me=lmmFit(y,obs.map(q=>row(q.t,q.g,true)),sub);
+    need(Mr&&Me,'The model could not be fitted (check for empty time × group combinations).');
+    const z=1.959964, icc=Me.s2u/(Me.s2u+Me.s2e);
+    const wald=idx=>{ const b=idx.map(i=>Me.b[i]), V=idx.map(i=>idx.map(j=>Me.cov[i][j])), Vi=matInv(V); if (!Vi) return [NaN,NaN]; const W=b.reduce((s,v,a)=>s+v*b.reduce((t,w,c)=>t+Vi[a][c]*w,0),0); return [W,chiUpper(W,idx.length)]; };
+    const range=(a,n)=>[...Array(n).keys()].map(i=>a+i), terms=[['Time',range(1,tN)]]; if (hasG) terms.push([cname(o.g),range(1+tN,gN)]); if (inter) terms.push([`Time × ${cname(o.g)}`,range(1+tN+gN,tN*gN)]);
+    let out=table(['Observations','Subjects','Obs. per subject','Subject variance (σ²u)','Residual variance (σ²e)','ICC'],[[Me.N,Me.nSub,`${Math.min(...Me.sizes)}–${Math.max(...Me.sizes)}`,f(Me.s2u),f(Me.s2e),f(icc)]])
+      + h5('Tests of fixed effects (Wald χ², Type III)')+table(['Effect','χ²','df','p'],terms.map(([nm,idx])=>{ const [W,p]=wald(idx); return [nm,f(W),idx.length,P(p)]; }))
+      + h5('Fixed-effect estimates (reference coding)')+table(['Term','B','SE','z','p','95% CI'],Mr.b.map((b,i)=>{ const se=Math.sqrt(Mr.cov[i][i]); return [names[i],f(b),f(se),f(b/se),P(pZ(b/se,'two')),ci([b-z*se,b+z*se])]; }));
+    const qf=(a,c)=>a.reduce((s,v,i)=>s+v*c.reduce((t,w,j)=>t+Me.cov[i][j]*w,0),0), est=x=>x.reduce((s,v,i)=>s+v*Me.b[i],0);
+    const xr=(t,g)=>{ const tc=tcodes(t,true), gc=g==null?new Array(gN).fill(0):gcodes(g,true); return [1,...tc,...gc,...(inter?tc.flatMap(a=>gc.map(b=>a*b)):[])]; };
+    const gs=hasG?glv:[null], emm=gs.map(g=>o.vars.map((_,t)=>{ const x=xr(t,g), m=est(x), se=Math.sqrt(qf(x,x)); return {m,se,lo:m-z*se,hi:m+z*se,x}; }));
+    out+=h5('Estimated marginal means')+table([...(hasG?[cname(o.g)]:[]),...o.vars.map(cname)],gs.map((g,gi)=>[...(hasG?[esc(g)]:[]),...emm[gi].map(e=>`${f(e.m,2)}<div class="sub">[${f(e.lo,2)}, ${f(e.hi,2)}]</div>`)]));
+    if (o.base){ const rows=[];
+      gs.forEach((g,gi)=>o.vars.slice(1).forEach((j,t1)=>{ const t=t1+1, dx=emm[gi][t].x.map((v,i)=>v-emm[gi][0].x[i]), d=est(dx), se=Math.sqrt(qf(dx,dx)), zz=d/se;
+        rows.push([...(hasG?[esc(g)]:[]),`${cname(j)} − ${cname(o.vars[0])}`,f(d),f(se),ci([d-z*se,d+z*se]),P(Math.min(1,(k-1)*pZ(zz,'two')))]); }));
+      out+=h5('Change from baseline (model-based, Bonferroni)')+table([...(hasG?[cname(o.g)]:[]),'Comparison','Difference','SE','95% CI','p (Bonferroni)'],rows); }
+    if (hasG && ng===2){ const rows=o.vars.map((j,t)=>{ const dx=emm[1][t].x.map((v,i)=>v-emm[0][t].x[i]), d=est(dx), se=Math.sqrt(qf(dx,dx)); return [cname(j),f(d),f(se),ci([d-z*se,d+z*se]),P(Math.min(1,k*pZ(d/se,'two')))]; });
+      out+=h5(`Group difference at each time point (${esc(glv[1])} − ${esc(glv[0])}, Bonferroni)`)+table(['Time point','Difference','SE','95% CI','p (Bonferroni)'],rows); }
+    const miss=C[0].filter((_,i)=>!Gc||Gc[i]!=null).length*k-obs.length;
+    return out+`<div class="plots">${meansSVG(o.vars.map(j=>D.cols[j]),gs.map((g,gi)=>({name:g??'',pts:emm[gi].map(e=>({m:e.m,lo:e.lo,hi:e.hi}))})),{title:'Estimated marginal means (± 95% CI)'})}</div>`
+      + note(`Random intercept for each subject, REML estimation, Wald tests. All available observations are used (${miss} missing measurements), so subjects with incomplete follow-up still contribute. ${lin?`Time scores: ${sc.map(v=>f(v,2)).join(', ')}.`:''}`)
+      + report(terms.map(([nm,idx])=>{ const [W,p]=wald(idx); return `${nm.replace(/<[^>]*>/g,'')}: χ²(${idx.length}) = ${f(W,2)}, p ${pAPA(p)}`; }).join('; '));
   }},
 };
 
@@ -2704,31 +2955,6 @@ function wRuns(node, fm={}){
   }
   return out;
 }
-const wPara=(inner,{jc,ind,before=0,after=120,line=360,keep}={})=>`<w:p><w:pPr>${keep?'<w:keepNext/>':''}<w:spacing w:before="${before}" w:after="${after}" w:line="${line}" w:lineRule="auto"/>${ind?'<w:ind w:firstLine="720"/>':''}${jc?`<w:jc w:val="${jc}"/>`:''}</w:pPr>${inner}</w:p>`;
-function wTable(tbl){
-  const grid=[], rows=[...tbl.rows], nHead=tbl.tHead?tbl.tHead.rows.length:0, rpt=tbl.classList.contains('rpt');
-  rows.forEach((tr,r)=>{ grid[r]=grid[r]||[]; let c=0;
-    for (const cell of tr.cells){ while (grid[r][c]) c++; const cs=cell.colSpan||1, rs=cell.rowSpan||1;
-      for (let dr=0;dr<rs;dr++){ grid[r+dr]=grid[r+dr]||[]; for (let dc=0;dc<cs;dc++) grid[r+dr][c+dc]={cell,top:dr===0,lead:dc===0,cs,rs}; }
-      c+=cs; } });
-  const ncol=Math.max(...grid.map(g=>g.length)), cw=Math.floor(9000/ncol);
-  const B=['top','left','bottom','right','insideH','insideV'].map(b=>`<w:${b} w:val="single" w:sz="4" w:space="0" w:color="000000"/>`).join('');
-  let x=`<w:tbl><w:tblPr><w:tblW w:w="0" w:type="auto"/><w:jc w:val="center"/><w:tblBorders>${B}</w:tblBorders><w:tblLayout w:type="autofit"/><w:tblCellMar><w:left w:w="80" w:type="dxa"/><w:right w:w="80" w:type="dxa"/></w:tblCellMar></w:tblPr><w:tblGrid>${`<w:gridCol w:w="${cw}"/>`.repeat(ncol)}</w:tblGrid>`;
-  grid.forEach((g,r)=>{
-    x+=`<w:tr>${r<nHead?'<w:trPr><w:tblHeader/><w:cantSplit/></w:trPr>':'<w:trPr><w:cantSplit/></w:trPr>'}`;
-    for (let c=0;c<ncol;c++){
-      const e=g[c];
-      if (!e){ x+=`<w:tc><w:tcPr><w:tcW w:w="${cw}" w:type="dxa"/></w:tcPr><w:p/></w:tc>`; continue; }
-      if (!e.lead) continue;
-      const th=e.cell.tagName==='TH', bold=th||e.cell.classList.contains('sig')||e.cell.classList.contains('hi');
-      const pr=`<w:tcPr><w:tcW w:w="${cw*e.cs}" w:type="dxa"/>${e.cs>1?`<w:gridSpan w:val="${e.cs}"/>`:''}${e.rs>1?(e.top?'<w:vMerge w:val="restart"/>':'<w:vMerge/>'):''}${th?'<w:shd w:val="clear" w:color="auto" w:fill="BFBFBF"/>':''}<w:vAlign w:val="center"/></w:tcPr>`;
-      const jc=(c===0&&!th&&!rpt)?'left':'center';
-      x+=`<w:tc>${pr}<w:p><w:pPr><w:spacing w:before="30" w:after="30" w:line="240" w:lineRule="auto"/><w:jc w:val="${jc}"/></w:pPr>${e.top?wRuns(e.cell,{b:bold||undefined,sz:22}):''}</w:p></w:tc>`;
-    }
-    x+='</w:tr>';
-  });
-  return x+'</w:tbl>';
-}
 function svgToPng(svg, scale=2){
   return new Promise((res,rej)=>{
     const str=svgString(svg,{noTitle:true}), vb=svg.viewBox.baseVal, img=new Image();
@@ -2738,17 +2964,85 @@ function svgToPng(svg, scale=2){
     img.src='data:image/svg+xml;charset=utf-8,'+encodeURIComponent(str);
   });
 }
-async function exportDocx(){
-  const cards=[...$('#results').children];
-  if (!cards.length){ alert('There are no results to export yet.'); return; }
+const WORD_DEF={paper:'A4',orient:'portrait',font:'Times New Roman',size:12,spacing:'360',tstyle:'shaded',heading:'Results',titlePage:false,title:'',author:'',inst:'',pageNum:true,newPage:false,notes:true,reports:false,figW:5.6,sep:': ',onlySel:true};
+let WOPT={...WORD_DEF, line:360};
+const wPara=(inner,{jc,ind,before=0,after=120,line,keep,pageBefore}={})=>`<w:p><w:pPr>${keep?'<w:keepNext/>':''}${pageBefore?'<w:pageBreakBefore/>':''}<w:spacing w:before="${before}" w:after="${after}" w:line="${line??WOPT.line}" w:lineRule="auto"/>${ind?'<w:ind w:firstLine="720"/>':''}${jc?`<w:jc w:val="${jc}"/>`:''}</w:pPr>${inner}</w:p>`;
+function wTable(tbl){
+  const st=WOPT.tstyle, grid=[], rows=[...tbl.rows], nHead=tbl.tHead?tbl.tHead.rows.length:0, rpt=tbl.classList.contains('rpt'), tsz=Math.max(16,(WOPT.size-1)*2);
+  rows.forEach((tr,r)=>{ grid[r]=grid[r]||[]; let c=0;
+    for (const cell of tr.cells){ while (grid[r][c]) c++; const cs=cell.colSpan||1, rs=cell.rowSpan||1;
+      for (let dr=0;dr<rs;dr++){ grid[r+dr]=grid[r+dr]||[]; for (let dc=0;dc<cs;dc++) grid[r+dr][c+dc]={cell,top:dr===0,lead:dc===0,cs,rs,r0:r}; }
+      c+=cs; } });
+  const ncol=Math.max(...grid.map(g=>g.length)), cw=Math.floor(9000/ncol);
+  const line=(b,sz=4)=>`<w:${b} w:val="single" w:sz="${sz}" w:space="0" w:color="000000"/>`, none=b=>`<w:${b} w:val="nil"/>`;
+  const B = st==='apa' ? line('top',8)+none('left')+line('bottom',8)+none('right')+none('insideH')+none('insideV') : ['top','left','bottom','right','insideH','insideV'].map(b=>line(b)).join('');
+  let x=`<w:tbl><w:tblPr><w:tblW w:w="0" w:type="auto"/><w:jc w:val="center"/><w:tblBorders>${B}</w:tblBorders><w:tblLayout w:type="autofit"/><w:tblCellMar><w:left w:w="80" w:type="dxa"/><w:right w:w="80" w:type="dxa"/></w:tblCellMar></w:tblPr><w:tblGrid>${`<w:gridCol w:w="${cw}"/>`.repeat(ncol)}</w:tblGrid>`;
+  grid.forEach((g,r)=>{
+    const head=r<nHead;
+    x+=`<w:tr><w:trPr>${head?'<w:tblHeader/>':''}<w:cantSplit/></w:trPr>`;
+    for (let c=0;c<ncol;c++){
+      const e=g[c];
+      if (!e){ x+=`<w:tc><w:tcPr><w:tcW w:w="${cw}" w:type="dxa"/></w:tcPr><w:p/></w:tc>`; continue; }
+      if (!e.lead) continue;
+      const th=e.cell.tagName==='TH', shade=st==='shaded'&&th, bold=(st==='apa'?head:th)||e.cell.classList.contains('sig')||e.cell.classList.contains('hi');
+      const lastHead=st==='apa'&&head&&(e.r0+e.rs===nHead);
+      const pr=`<w:tcPr><w:tcW w:w="${cw*e.cs}" w:type="dxa"/>${e.cs>1?`<w:gridSpan w:val="${e.cs}"/>`:''}${e.rs>1?(e.top?'<w:vMerge w:val="restart"/>':'<w:vMerge/>'):''}${lastHead?`<w:tcBorders>${line('bottom',6)}</w:tcBorders>`:''}${shade?'<w:shd w:val="clear" w:color="auto" w:fill="BFBFBF"/>':''}<w:vAlign w:val="center"/></w:tcPr>`;
+      const jc=(c===0&&!(th&&st==='shaded')&&!(rpt&&st!=='apa'))?'left':'center';
+      x+=`<w:tc>${pr}<w:p><w:pPr><w:spacing w:before="30" w:after="30" w:line="240" w:lineRule="auto"/><w:jc w:val="${jc}"/></w:pPr>${e.top?wRuns(e.cell,{b:bold||undefined,sz:tsz}):''}</w:p></w:tc>`;
+    }
+    x+='</w:tr>';
+  });
+  return x+'</w:tbl>';
+}
+function openWordOptions(){
+  if (!$('#results').children.length){ alert('There are no results to export yet.'); return; }
+  let o={...WORD_DEF}; try { Object.assign(o, JSON.parse(store.get('statbench.word')||'{}')); } catch {}
+  const sel=(name,opts,v)=>`<select name="${name}">${opts.map(([k,l])=>`<option value="${k}"${String(v)===String(k)?' selected':''}>${l}</option>`).join('')}</select>`;
+  const ck=(name,label,v)=>`<label class="ck"><input type="checkbox" name="${name}"${v?' checked':''}>${label}</label>`;
+  const nSel=[...$('#results').children].filter(c=>c.querySelector('.inc input')?.checked!==false).length, nAll=$('#results').children.length;
+  openDialog('Export to Word', `
+    <fieldset><legend>Page</legend><div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+      <label class="f">Paper${sel('paper',[['A4','A4'],['Letter','US Letter']],o.paper)}</label><label class="f">Orientation${sel('orient',[['portrait','Portrait'],['landscape','Landscape']],o.orient)}</label>
+      <label class="f">Font${sel('font',[['Times New Roman','Times New Roman'],['Calibri','Calibri'],['Arial','Arial'],['Cambria','Cambria'],['Georgia','Georgia']],o.font)}</label><label class="f">Font size${sel('size',[[10,'10 pt'],[11,'11 pt'],[12,'12 pt'],[14,'14 pt']],o.size)}</label>
+      <label class="f">Line spacing${sel('spacing',[['240','Single'],['276','1.15'],['360','1.5'],['480','Double']],o.spacing)}</label><label class="f">Figure width (inches)<input type="number" name="figW" step="0.1" min="2" max="9" value="${o.figW}"></label></div></fieldset>
+    <fieldset><legend>Tables &amp; captions</legend><div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+      <label class="f">Table style${sel('tstyle',[['shaded','Shaded headers, full grid (like your report)'],['apa','APA style (horizontal lines only)'],['grid','Plain grid, no shading']],o.tstyle)}</label>
+      <label class="f">Caption style${sel('sep',[[': ','Table 1: Title'],['. ','Table 1. Title'],[' — ','Table 1 — Title']],o.sep)}</label></div></fieldset>
+    <fieldset><legend>Content</legend>
+      <label class="f">Main heading<input name="heading" value="${esc(o.heading)}"></label>
+      ${ck('onlySel',`Only results ticked “Word” (${nSel} of ${nAll})`,o.onlySel)}${ck('newPage','Start each result on a new page',o.newPage)}${ck('notes','Include table footnotes',o.notes)}${ck('reports','Include the one-line “Report:” summaries',o.reports)}${ck('pageNum','Page numbers in the footer',o.pageNum)}
+    </fieldset>
+    <fieldset><legend>${ck('titlePage','Title page',o.titlePage)}</legend>
+      <label class="f">Title<input name="title" value="${esc(o.title)}" placeholder="e.g. Results of the thesis"></label>
+      <label class="f">Author<input name="author" value="${esc(o.author)}"></label>
+      <label class="f">Institution / department<input name="inst" value="${esc(o.inst)}"></label></fieldset>`, 'Export .docx', ()=>{
+    const F=$('#dlgForm'), v=n=>F.elements[n].value, c=n=>F.elements[n].checked;
+    const opts={paper:v('paper'),orient:v('orient'),font:v('font'),size:+v('size'),spacing:v('spacing'),figW:Math.max(2,Math.min(9,+v('figW')||5.6)),tstyle:v('tstyle'),sep:v('sep'),heading:v('heading'),onlySel:c('onlySel'),newPage:c('newPage'),notes:c('notes'),reports:c('reports'),pageNum:c('pageNum'),titlePage:c('titlePage'),title:v('title'),author:v('author'),inst:v('inst')};
+    store.set('statbench.word',JSON.stringify(opts)); exportDocx(opts);
+  });
+}
+async function exportDocx(opts={}){
+  WOPT={...WORD_DEF,...opts}; WOPT.line=+WOPT.spacing||360;
+  const cards=[...$('#results').children].filter(c=>!WOPT.onlySel||c.querySelector('.inc input')?.checked!==false);
+  if (!cards.length){ alert('No results are selected for export (tick “Word” on the results you want).'); return; }
   const btn=$('#bWord'), label=btn.textContent; btn.disabled=true; btn.textContent='Building Word file…';
-  const root=document.documentElement, prevTheme=root.dataset.theme; root.dataset.theme='light'; // charts in print colours
+  const root=document.documentElement, prevTheme=root.dataset.theme; root.dataset.theme='light';
   try {
-    let body='', nT=0, nF=0; const imgs=[];
-    body+=wPara(wRun('Results',{b:true,sz:32}),{jc:'center',after:240});
+    const A4=WOPT.paper==='A4', land=WOPT.orient==='landscape', pw=A4?11906:12240, ph=A4?16838:15840, PW=land?ph:pw, PH=land?pw:ph, contentIn=(PW-2880)/1440;
+    const S=WOPT.size*2, sep=WOPT.sep; let body='', nT=0, nF=0; const imgs=[];
+    if (WOPT.titlePage){
+      body+=`<w:p><w:pPr><w:spacing w:before="${Math.round(PH*0.22)}" w:after="240"/><w:jc w:val="center"/></w:pPr>${wRun(WOPT.title||'Statistical results',{b:true,sz:S+16})}</w:p>`;
+      if (WOPT.author) body+=wPara(wRun(WOPT.author,{sz:S+4}),{jc:'center',after:120});
+      if (WOPT.inst) body+=wPara(wRun(WOPT.inst,{sz:S+2}),{jc:'center',after:120});
+      body+=wPara(wRun(new Date().toLocaleDateString(undefined,{year:'numeric',month:'long',day:'numeric'}),{sz:S}),{jc:'center',after:120});
+      body+='<w:p><w:r><w:br w:type="page"/></w:r></w:p>';
+    }
+    if (WOPT.heading) body+=wPara(wRun(WOPT.heading,{b:true,sz:S+8}),{jc:'center',after:240});
+    let first=true;
     for (const card of cards){
-      const bd=card.querySelector('.body'), title=card.querySelector('h3').textContent;
-      if (!bd.querySelector('.noheading')) body+=wPara(wRun(title,{b:true,sz:26}),{before:240,after:120,keep:true});
+      const bd=card.querySelector('.body'), title=card.querySelector('h3').textContent, pb=WOPT.newPage&&!first; first=false;
+      if (!bd.querySelector('.noheading')) body+=wPara(wRun(title,{b:true,sz:S+2}),{before:240,after:120,keep:true,pageBefore:pb});
+      else if (pb) body+='<w:p><w:r><w:br w:type="page"/></w:r></w:p>';
       let caption=null, usedTitle=false;
       for (const el of bd.children){
         if (el.hidden) continue;
@@ -2757,35 +3051,36 @@ async function exportDocx(){
         else if (el.classList.contains('caption')){ caption=el.textContent.replace(/^Table:\s*/,''); }
         else if (tg==='TABLE'){
           const cap=caption||(usedTitle?`${title} (continued)`:title); usedTitle=true; caption=null;
-          body+=wPara(wRun(`Table ${++nT}: ${cap}`,{b:true}),{before:200,after:80,line:240,keep:true})+wTable(el);
+          body+=wPara(wRun(`Table ${++nT}${sep}${cap}`,{b:true}),{before:200,after:80,line:240,keep:true})+wTable(el);
         }
         else if (el.classList.contains('plots')){
           for (const svg of el.querySelectorAll('svg.plot')){
-            const png=await svgToPng(svg), id=imgs.length+1, cx=Math.round(5.6*914400), cy=Math.round(cx*png.h/png.w);
+            const png=await svgToPng(svg), id=imgs.length+1, cx=Math.round(Math.min(WOPT.figW,contentIn)*914400), cy=Math.round(cx*png.h/png.w);
             imgs.push(png.data); nF++;
             body+=`<w:p><w:pPr><w:keepNext/><w:spacing w:before="200" w:after="60"/><w:jc w:val="center"/></w:pPr><w:r><w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0"><wp:extent cx="${cx}" cy="${cy}"/><wp:docPr id="${id}" name="Figure ${id}"/><a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic><pic:nvPicPr><pic:cNvPr id="${id}" name="image${id}.png"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="rIdImg${id}"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>`;
-            const ft=svg.querySelector('.ttl')?.textContent || title;
-            body+=wPara(wRun(`Figure ${nF}: ${ft}`,{b:true}),{jc:'center',after:200,line:240});
+            body+=wPara(wRun(`Figure ${nF}${sep}${svg.querySelector('.ttl')?.textContent || title}`,{b:true}),{jc:'center',after:200,line:240});
           }
         }
         else if (el.classList.contains('para')) body+=wPara(wRuns(el),{jc:'both',ind:true});
-        else if (el.classList.contains('note')) body+=wPara(wRuns(el,{sz:20}),{after:160,line:240});
-        else if (el.classList.contains('report')) body+=wPara(wRuns(el,{i:true}),{after:160});
+        else if (el.classList.contains('note')){ if (WOPT.notes) body+=wPara(wRuns(el,{sz:S-4}),{after:160,line:240}); }
+        else if (el.classList.contains('report')){ if (WOPT.reports) body+=wPara(wRuns(el,{i:true}),{after:160}); }
         else if (el.classList.contains('warn')) body+=wPara(wRuns(el,{i:true,color:'B45309'}),{after:160});
       }
     }
     const NS='xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"';
     const X='<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n';
-    const doc=`${X}<w:document ${NS}><w:body>${body}<w:sectPr><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440" w:header="708" w:footer="708" w:gutter="0"/></w:sectPr></w:body></w:document>`;
-    const styles=`${X}<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman" w:eastAsia="Times New Roman" w:cs="Times New Roman"/><w:sz w:val="24"/><w:szCs w:val="24"/><w:lang w:val="en-US"/></w:rPr></w:rPrDefault><w:pPrDefault><w:pPr><w:spacing w:after="120"/></w:pPr></w:pPrDefault></w:docDefaults><w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/><w:qFormat/></w:style><w:style w:type="table" w:default="1" w:styleId="TableNormal"><w:name w:val="Normal Table"/><w:tblPr><w:tblInd w:w="0" w:type="dxa"/><w:tblCellMar><w:top w:w="0" w:type="dxa"/><w:left w:w="108" w:type="dxa"/><w:bottom w:w="0" w:type="dxa"/><w:right w:w="108" w:type="dxa"/></w:tblCellMar></w:tblPr></w:style></w:styles>`;
-    const rels=`${X}<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rIdStyles" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>${imgs.map((_,i)=>`<Relationship Id="rIdImg${i+1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/image${i+1}.png"/>`).join('')}</Relationships>`;
+    const sect=`<w:sectPr>${WOPT.pageNum?'<w:footerReference w:type="default" r:id="rIdFooter"/>':''}<w:pgSz w:w="${PW}" w:h="${PH}"${land?' w:orient="landscape"':''}/><w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440" w:header="708" w:footer="708" w:gutter="0"/>${WOPT.titlePage&&WOPT.pageNum?'<w:titlePg/>':''}</w:sectPr>`;
+    const doc=`${X}<w:document ${NS}><w:body>${body}${sect}</w:body></w:document>`;
+    const fnt=escX(WOPT.font);
+    const styles=`${X}<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii="${fnt}" w:hAnsi="${fnt}" w:eastAsia="${fnt}" w:cs="${fnt}"/><w:sz w:val="${S}"/><w:szCs w:val="${S}"/><w:lang w:val="en-US"/></w:rPr></w:rPrDefault><w:pPrDefault><w:pPr><w:spacing w:after="120"/></w:pPr></w:pPrDefault></w:docDefaults><w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/><w:qFormat/></w:style><w:style w:type="table" w:default="1" w:styleId="TableNormal"><w:name w:val="Normal Table"/><w:tblPr><w:tblInd w:w="0" w:type="dxa"/><w:tblCellMar><w:top w:w="0" w:type="dxa"/><w:left w:w="108" w:type="dxa"/><w:bottom w:w="0" w:type="dxa"/><w:right w:w="108" w:type="dxa"/></w:tblCellMar></w:tblPr></w:style></w:styles>`;
+    const footer=`${X}<w:ftr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:fldChar w:fldCharType="begin"/></w:r><w:r><w:instrText xml:space="preserve"> PAGE </w:instrText></w:r><w:r><w:fldChar w:fldCharType="separate"/></w:r><w:r><w:t>1</w:t></w:r><w:r><w:fldChar w:fldCharType="end"/></w:r></w:p></w:ftr>`;
+    const rels=`${X}<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rIdStyles" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>${WOPT.pageNum?'<Relationship Id="rIdFooter" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/footer" Target="footer1.xml"/>':''}${imgs.map((_,i)=>`<Relationship Id="rIdImg${i+1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/image${i+1}.png"/>`).join('')}</Relationships>`;
     const files=[
-      {name:'[Content_Types].xml', data:`${X}<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Default Extension="png" ContentType="image/png"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/><Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/></Types>`},
+      {name:'[Content_Types].xml', data:`${X}<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Default Extension="png" ContentType="image/png"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>${WOPT.pageNum?'<Override PartName="/word/footer1.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.footer+xml"/>':''}<Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/></Types>`},
       {name:'_rels/.rels', data:`${X}<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/></Relationships>`},
-      {name:'docProps/core.xml', data:`${X}<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><dc:title>Statistical results</dc:title><dc:creator>StatBench</dc:creator><dcterms:created xsi:type="dcterms:W3CDTF">${new Date().toISOString().slice(0,19)}Z</dcterms:created></cp:coreProperties>`},
-      {name:'word/document.xml', data:doc},
-      {name:'word/styles.xml', data:styles},
-      {name:'word/_rels/document.xml.rels', data:rels},
+      {name:'docProps/core.xml', data:`${X}<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><dc:title>${escX(WOPT.title||'Statistical results')}</dc:title><dc:creator>${escX(WOPT.author||'StatBench')}</dc:creator><dcterms:created xsi:type="dcterms:W3CDTF">${new Date().toISOString().slice(0,19)}Z</dcterms:created></cp:coreProperties>`},
+      {name:'word/document.xml', data:doc},{name:'word/styles.xml', data:styles},{name:'word/_rels/document.xml.rels', data:rels},
+      ...(WOPT.pageNum?[{name:'word/footer1.xml', data:footer}]:[]),
       ...imgs.map((d,i)=>({name:`word/media/image${i+1}.png`, data:d})),
     ];
     download(`StatBench-results-${new Date().toISOString().slice(0,10)}.docx`, zipStore(files,'application/vnd.openxmlformats-officedocument.wordprocessingml.document'));
@@ -2797,7 +3092,7 @@ async function exportDocx(){
 function addResult(title, html, useData=true){
   const el=document.createElement('article'); el.className='card';
   const flt = useData && D.filter && MASK ? `Filter: <code>${esc(D.filter)}</code> (n = ${MASK.filter(Boolean).length}) · ` : '';
-  el.innerHTML=`<header><h3>${esc(title)}</h3><span class="meta">${flt}${new Date().toLocaleString()}</span><button class="mv" data-d="-1" title="Move up">↑</button><button class="mv" data-d="1" title="Move down">↓</button><button class="copy" title="Copy tables as tab-separated text (paste into Excel/Word)">Copy</button><button class="x" title="Remove">×</button></header><div class="body">${html}</div>`;
+  el.innerHTML=`<header><h3>${esc(title)}</h3><span class="meta">${flt}${new Date().toLocaleString()}</span><label class="inc" title="Include this result in the Word export"><input type="checkbox" checked> Word</label><button class="mv" data-d="-1" title="Move up">↑</button><button class="mv" data-d="1" title="Move down">↓</button><button class="copy" title="Copy tables as tab-separated text (paste into Excel/Word)">Copy</button><button class="x" title="Remove">×</button></header><div class="body">${html}</div>`;
   el.querySelectorAll('svg.plot').forEach(svg=>{ const w=document.createElement('div'); w.className='pw'; svg.replaceWith(w); w.append(svg);
     w.insertAdjacentHTML('beforeend','<div class="dlbar"><button class="dl" data-f="png" title="Download as PNG image">PNG</button><button class="dl" data-f="svg" title="Download as SVG vector image">SVG</button></div>'); });
   el.querySelectorAll('h3, h5, .caption, .para').forEach(n=>{ n.contentEditable='true'; n.spellcheck=true; });
@@ -2825,14 +3120,16 @@ $('#results').addEventListener('click', e=>{
   }
 });
 let resTimer;
+$('#results').addEventListener('change', e=>{ if (e.target.matches('.inc input')){ e.target.toggleAttribute('checked', e.target.checked); e.target.closest('.card').classList.toggle('noexp',!e.target.checked); saveResults(); } });
 $('#results').addEventListener('input', ()=>{ clearTimeout(resTimer); resTimer=setTimeout(saveResults,500); });
 function saveResults(){ $('#rcount').textContent=$('#results').children.length||''; store.set('statbench.results', $('#results').innerHTML); }
 $('#bClearRes').onclick=()=>{ if ($('#results').children.length && confirm('Remove all results?')){ $('#results').innerHTML=''; saveResults(); } };
 $('#bPrint').onclick=()=>window.print();
-$('#bWord').onclick=()=>exportDocx();
+$('#bWord').onclick=()=>openWordOptions();
+$('#bChartStyle').onclick=()=>openChartStyle();
 $('#bSaveRes').onclick=()=>{
   const css=document.querySelector('style').textContent, theme=document.documentElement.dataset.theme||'';
-  download('statbench-results.html', `<!doctype html><html lang="en"${theme?` data-theme="${theme}"`:''}><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>StatBench results</title><style>${css} main{max-width:980px;margin:0 auto}.card .x,.card .copy,.card .mv,.dlbar{display:none}</style></head><body><main><div id="results">${$('#results').innerHTML}</div></main></body></html>`, 'text/html');
+  download('statbench-results.html', `<!doctype html><html lang="en"${theme?` data-theme="${theme}"`:''}><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>StatBench results</title><style>${css} main{max-width:980px;margin:0 auto}.card .x,.card .copy,.card .mv,.card .inc,.dlbar{display:none}</style></head><body><main><div id="results">${$('#results').innerHTML}</div></main></body></html>`, 'text/html');
 };
 
 /* ================= Shell ================= */
@@ -2844,7 +3141,7 @@ document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>showTab(b.dat
 (function buildSide(){
   const groups=new Map();
   for (const [k,A] of Object.entries(AN)){ if (!groups.has(A.g)) groups.set(A.g,[]); groups.get(A.g).push(`<button data-an="${k}">${A.name}</button>`); }
-  const ORDER=['Reports','Describe','Graphs','Compare means','Nonparametric','Relationships','Categorical','Agreement & diagnostics','Survival','Multivariate','Meta-analysis','Planning'];
+  const ORDER=['Reports','Describe','Graphs','Compare means','Repeated measures','Nonparametric','Relationships','Categorical','Agreement & diagnostics','Survival','Multivariate','Meta-analysis','Planning'];
   $('#side').innerHTML=[...groups].sort((a,b)=>(ORDER.indexOf(a[0])+99)%99-(ORDER.indexOf(b[0])+99)%99).map(([g,b])=>`<h4>${g}</h4>${b.join('')}`).join('');
   $('#side').addEventListener('click', e=>{ const b=e.target.closest('[data-an]'); if (b) openAnalysis(b.dataset.an); });
 })();
@@ -2855,6 +3152,8 @@ function applyTheme(t){
 }
 $('#themeBtn').onclick=()=>applyTheme(THEMES[(THEMES.indexOf(store.get('statbench.theme')||'auto')+1)%3]);
 applyTheme(store.get('statbench.theme')||'auto');
+try { Object.assign(CHART, JSON.parse(store.get('statbench.chart')||'{}')); if (!SIZES[CHART.size]) CHART.size='medium'; } catch {}
+applyChartStyle();
 try { const s=JSON.parse(store.get('statbench.data')||'null'); if (s && Array.isArray(s.cols) && Array.isArray(s.rows)) D=s; } catch {}
 const savedRes=store.get('statbench.results'); if (savedRes) $('#results').innerHTML=savedRes;
 saveResults(); dataChanged(true);
