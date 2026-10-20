@@ -92,7 +92,15 @@ table.data tr.off td:not(.rn){opacity:.35}
 .filterbar{display:flex;align-items:center;gap:8px;margin:-4px 0 10px;padding:6px 10px;border-radius:7px;background:var(--accent-soft);color:var(--accent);font-size:13px}
 .filterbar[hidden]{display:none}
 .filterbar code,.card code,dialog code{font-family:ui-monospace,monospace;font-size:12px}
-.card>header button.copy{padding:2px 9px;font-size:12px}
+.card>header button.copy,.card>header button.mv{padding:2px 9px;font-size:12px}
+.card [contenteditable="true"]{border-radius:4px;outline:1px dashed transparent;outline-offset:2px}
+.card [contenteditable="true"]:hover{outline-color:var(--border)}
+.card [contenteditable="true"]:focus{outline:2px solid var(--accent)}
+svg.consort .cb,svg.consort .cl{fill:var(--panel);stroke:var(--text);stroke-width:1.1}
+svg.consort .cp{fill:var(--accent-soft);stroke:var(--accent)}
+svg.consort .ca{stroke:var(--text);stroke-width:1.2;fill:none}
+svg.consort .ca2{stroke:var(--text);stroke-width:1.2;fill:none}
+svg.consort text{fill:var(--text);font-size:11.5px}
 button:disabled{opacity:.45;cursor:default}
 button:disabled:hover{border-color:var(--border)}
 .pw{position:relative}
@@ -153,7 +161,7 @@ textarea.paste{width:100%;min-height:200px;font-family:ui-monospace,monospace;fo
   .top{gap:8px;flex-wrap:wrap}
 }
 @media print{
-  .top,.side,.toolbar,#tab-data,.card .x,.card .copy,.dlbar{display:none!important}
+  .top,.side,.toolbar,#tab-data,.card .x,.card .copy,.card .mv,.dlbar{display:none!important}
   .app{display:block}
   #tab-results{display:block!important}
   .card{break-inside:avoid;box-shadow:none}
@@ -179,7 +187,7 @@ textarea.paste{width:100%;min-height:200px;font-family:ui-monospace,monospace;fo
   <main>
     <section id="tab-data">
       <div class="toolbar">
-        <button id="bImport">Import CSV…</button>
+        <button id="bImport">Import CSV / Excel…</button>
         <button id="bPaste">Paste data…</button>
         <button id="bSample">Sample data…</button>
         <span class="sep"></span>
@@ -195,7 +203,7 @@ textarea.paste{width:100%;min-height:200px;font-family:ui-monospace,monospace;fo
         <button id="bExport">Export CSV</button>
         <button id="bClear" class="danger">Clear</button>
         <span class="info" id="dataInfo"></span>
-        <input type="file" id="file" accept=".csv,.tsv,.txt,text/csv" hidden>
+        <input type="file" id="file" accept=".csv,.tsv,.txt,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden>
       </div>
       <div class="filterbar" id="filterBar" hidden>Filter active: <code id="filterExpr"></code><span id="filterN"></span><span class="spacer"></span><button id="bFilterOff">Remove filter</button></div>
       <div class="tablewrap" id="tableWrap"></div>
@@ -206,6 +214,7 @@ textarea.paste{width:100%;min-height:200px;font-family:ui-monospace,monospace;fo
         <button id="bSaveRes">Export results (HTML)</button>
         <button id="bPrint">Print / PDF</button>
         <button id="bClearRes" class="danger">Clear results</button>
+        <span class="info">Tip: click any title or paragraph to edit it before exporting; use ↑ ↓ to reorder.</span>
       </div>
       <div id="results"></div>
     </section>
@@ -708,8 +717,8 @@ const badge = j => colIsNum(j) ? '<span class="badge n" title="Numeric">123</spa
 function renderData(){
   const wrap=$('#tableWrap');
   if (!D.cols.length){
-    wrap.innerHTML=`<div class="empty"><h2>No data yet</h2><div>Import a CSV file, paste from a spreadsheet, or start with the sample dataset.</div>
-      <div class="row"><button class="primary" data-act="sample">Load sample data</button><button data-act="import">Import CSV…</button><button data-act="paste">Paste data…</button><button data-act="blank">New blank sheet</button></div></div>`;
+    wrap.innerHTML=`<div class="empty"><h2>No data yet</h2><div>Import a CSV or Excel (.xlsx) file, paste from a spreadsheet, or start with the sample dataset.</div>
+      <div class="row"><button class="primary" data-act="sample">Load sample data</button><button data-act="import">Import CSV / Excel…</button><button data-act="paste">Paste data…</button><button data-act="blank">New blank sheet</button></div></div>`;
     updateInfo(); return;
   }
   let h='<table class="data"><thead><tr><th class="rn">#</th>';
@@ -753,7 +762,17 @@ $('#tableWrap').addEventListener('click', e=>{
 });
 $('#bSample').onclick=()=>openSamples();
 $('#bImport').onclick=()=>$('#file').click();
-$('#file').onchange=e=>{ const f=e.target.files[0]; if (!f) return; const rd=new FileReader(); rd.onload=()=>loadTable(parseCSV(rd.result)); rd.readAsText(f); e.target.value=''; };
+$('#file').onchange=async e=>{
+  const fl=e.target.files[0]; e.target.value=''; if (!fl) return;
+  if (/\.xls$/i.test(fl.name)){ alert('Old .xls files are not supported. In Excel choose File → Save As → Excel Workbook (.xlsx) or CSV.'); return; }
+  if (!/\.xlsx$/i.test(fl.name)){ const rd=new FileReader(); rd.onload=()=>loadTable(parseCSV(rd.result)); rd.readAsText(fl); return; }
+  try {
+    const X=await readXlsx(await fl.arrayBuffer());
+    const load=async k=>{ const rows=await X.parse(X.sheets[k]); if (!rows.length) throw new Error(`Sheet "${X.sheets[k].name}" is empty.`); loadTable(rows.map(r=>r.map(String))); };
+    if (X.sheets.length===1) await load(0);
+    else openDialog('Choose a worksheet', `<label class="f">Worksheet in ${esc(fl.name)}<select name="sh">${X.sheets.map((s,k)=>`<option value="${k}">${esc(s.name)}</option>`).join('')}</select></label><span class="hint">The first row of the sheet is used as column names.</span>`, 'Load', ()=>{ load(+$('#dlgForm').elements.sh.value).catch(err=>alert('Could not read the sheet: '+err.message)); });
+  } catch(err){ alert('Could not read the Excel file: '+err.message); }
+};
 $('#bAddRow').onclick=()=>{ snap(); if (!D.cols.length) D.cols=['V1']; D.rows.push(D.cols.map(()=>'')); dataChanged(true); const w=$('#tableWrap'); w.scrollTop=w.scrollHeight; };
 $('#bAddCol').onclick=()=>{ snap(); D.cols.push(uniqueName(`V${D.cols.length+1}`)); D.rows.forEach(r=>r.push('')); dataChanged(true); };
 $('#bExport').onclick=()=>download('data.csv', toCSV(), 'text/csv');
@@ -1055,6 +1074,117 @@ function boxGroupedSVG(cats, groups, data, {ylab,xlab,title}={}){ // data[c][g] 
     g+=`<line x1="${x-bw/2}" x2="${x+bw/2}" y1="${Pl.sy(b.md)}" y2="${Pl.sy(b.md)}" style="stroke:${col};stroke-width:2.5"/>`;
     b.outs.forEach(v=>{ g+=`<circle cx="${x}" cy="${Pl.sy(v)}" r="3" style="fill:none;stroke:${col};stroke-width:1.2"/>`; }); }));
   return Pl.wrap(g);
+}
+function friedmanP(M){ // M: n × k complete matrix
+  const n=M.length, k=M[0].length, Rk=M.map(rank), Rj=M[0].map((_,c)=>sum(Rk.map(r=>r.r[c]))), T=sum(Rk.map(r=>r.T));
+  const den=n*k*(k+1)-T/(k-1); if (!(den>0)) return 1;
+  return chiUpper((12*sum(Rj.map(v=>v*v))-3*n*n*k*(k+1)**2)/den,k-1);
+}
+function sphericityEps(S,k,n){ // Greenhouse–Geisser and Huynh–Feldt from a k×k covariance matrix
+  if (k<3) return {gg:1,hf:1};
+  const rm=S.map(mean), tm=mean(rm), St=S.map((r,a)=>r.map((v,b)=>v-rm[a]-rm[b]+tm)), tr=sum(St.map((r,a)=>r[a])), sq=sum(St.flat().map(v=>v*v));
+  const gg=sq>0?Math.min(1,tr*tr/((k-1)*sq)):1; return {gg, hf:Math.min(1,(n*(k-1)*gg-2)/((k-1)*(n-1-(k-1)*gg)))};
+}
+function rmAnovaP(M){ // one-way repeated measures, Greenhouse–Geisser corrected p
+  const n=M.length, k=M[0].length, all=M.flat(), gm=mean(all), cm=M[0].map((_,j)=>mean(M.map(r=>r[j])));
+  const ssc=n*sum(cm.map(m=>(m-gm)**2)), sss=k*sum(M.map(r=>(mean(r)-gm)**2)), sse=sum(all.map(v=>(v-gm)**2))-ssc-sss;
+  const F=(ssc/(k-1))/(sse/((k-1)*(n-1))), S=cm.map((mi,a)=>cm.map((mj,b)=>sum(M.map(r=>(r[a]-mi)*(r[b]-mj)))/(n-1)));
+  const e=sphericityEps(S,k,n).gg; return fUpper(F,(k-1)*e,(k-1)*(n-1)*e);
+}
+function ncfCdf(x,d1,d2,lam){ // noncentral F CDF (Poisson mixture of beta)
+  if (x<=0) return 0; const y=d1*x/(d1*x+d2), h=lam/2; let s=0;
+  const j0=Math.floor(h); const term=j=>Math.exp(-h+j*Math.log(h||1e-300)-lgamma(j+1))*ibeta(y,d1/2+j,d2/2);
+  if (h===0) return ibeta(y,d1/2,d2/2);
+  for (let j=j0;j<j0+2000;j++){ const t=term(j); s+=t; if (t<1e-14 && j>j0+10) break; }
+  for (let j=j0-1;j>=0;j--){ const t=term(j); s+=t; if (t<1e-14) break; }
+  return Math.min(1,s);
+}
+function coxFit(time, ev, X){ // Cox PH, Breslow ties, Newton–Raphson with step halving
+  const n=X.length, p=X[0].length, ord=time.map((_,i)=>i).sort((a,b)=>time[b]-time[a]);
+  const evalAt=b=>{ let ll=0; const g=new Array(p).fill(0), H=Array.from({length:p},()=>new Array(p).fill(0));
+    let S0=0; const S1=new Array(p).fill(0), S2=Array.from({length:p},()=>new Array(p).fill(0));
+    for (let q=0;q<n;){
+      const t=time[ord[q]]; let r=q; const evs=[];
+      while (r<n && time[ord[r]]===t){ const i=ord[r], x=X[i], w=Math.exp(x.reduce((s,v,c)=>s+v*b[c],0)); S0+=w;
+        for (let a=0;a<p;a++){ S1[a]+=w*x[a]; for (let c=0;c<p;c++) S2[a][c]+=w*x[a]*x[c]; } if (ev[i]) evs.push(i); r++; }
+      const d=evs.length;
+      if (d){ for (const i of evs){ for (let a=0;a<p;a++){ ll+=X[i][a]*b[a]; g[a]+=X[i][a]; } }
+        ll-=d*Math.log(S0); for (let a=0;a<p;a++){ g[a]-=d*S1[a]/S0; for (let c=0;c<p;c++) H[a][c]-=d*(S2[a][c]/S0-S1[a]*S1[c]/(S0*S0)); } }
+      q=r;
+    }
+    return {ll,g,H}; };
+  let b=new Array(p).fill(0), cur=evalAt(b); const ll0=cur.ll; let conv=false, it=0;
+  for (; it<60; it++){
+    const inv=matInv(cur.H.map(r=>r.map(v=>-v))); if (!inv) return null;
+    let step=inv.map(row=>row.reduce((s,v,c)=>s+v*cur.g[c],0)), nb, nx, h=1;
+    for (let k=0;k<30;k++){ nb=b.map((v,c)=>v+h*step[c]); nx=evalAt(nb); if (nx.ll>=cur.ll-1e-10) break; h/=2; }
+    const delta=Math.max(...step.map(Math.abs))*h; b=nb; cur=nx;
+    if (delta<1e-9){ conv=true; break; }
+  }
+  const inv=matInv(cur.H.map(r=>r.map(v=>-v)));
+  let cn=0, cd=0; const lp=X.map(x=>x.reduce((s,v,c)=>s+v*b[c],0));
+  for (let i=0;i<n;i++) if (ev[i]) for (let j=0;j<n;j++) if (time[j]>time[i]){ cd++; cn+= lp[i]>lp[j]?1:lp[i]===lp[j]?0.5:0; }
+  return {b, inv, ll:cur.ll, ll0, conv, it, C:cn/cd};
+}
+async function readXlsx(buf){
+  const u=new Uint8Array(buf), dv=new DataView(buf), td=new TextDecoder();
+  let e=u.length-22; while (e>=0 && dv.getUint32(e,true)!==0x06054b50) e--;
+  if (e<0) throw new Error('This is not a valid .xlsx file (old .xls files are not supported — save as .xlsx or CSV).');
+  const entries={}; let q=dv.getUint32(e+16,true);
+  for (let i=0, cnt=dv.getUint16(e+10,true); i<cnt; i++){
+    const nl=dv.getUint16(q+28,true), xl=dv.getUint16(q+30,true), cl=dv.getUint16(q+32,true);
+    entries[td.decode(u.subarray(q+46,q+46+nl))]={m:dv.getUint16(q+10,true), cs:dv.getUint32(q+20,true), off:dv.getUint32(q+42,true)};
+    q+=46+nl+xl+cl;
+  }
+  const read=async name=>{ const en=entries[name.replace(/^\//,'')]; if (!en) return null;
+    const st=en.off+30+dv.getUint16(en.off+26,true)+dv.getUint16(en.off+28,true), data=u.subarray(st,st+en.cs);
+    if (en.m===0) return td.decode(data);
+    if (typeof DecompressionStream==='undefined') throw new Error('Your browser cannot read compressed Excel files — please update it, or save as CSV.');
+    return td.decode(await new Response(new Blob([data]).stream().pipeThrough(new DecompressionStream('deflate-raw'))).arrayBuffer()); };
+  const xml=s=>new DOMParser().parseFromString(s,'application/xml'), tags=(d,t)=>[...d.getElementsByTagName(t)];
+  const wb=xml(await read('xl/workbook.xml')||''), rels=xml(await read('xl/_rels/workbook.xml.rels')||'<x/>');
+  const relMap={}; tags(rels,'Relationship').forEach(r=>{ relMap[r.getAttribute('Id')]=r.getAttribute('Target'); });
+  const sheets=tags(wb,'sheet').map(s=>{ const t=relMap[s.getAttribute('r:id')||s.getAttributeNS('http://schemas.openxmlformats.org/officeDocument/2006/relationships','id')]||''; return {name:s.getAttribute('name'), path:t.startsWith('/')?t.slice(1):'xl/'+t.replace(/^\.\//,'')}; });
+  if (!sheets.length) throw new Error('No worksheets found.');
+  const ssx=await read('xl/sharedStrings.xml'), ss=ssx?tags(xml(ssx),'si').map(si=>tags(si,'t').map(t=>t.textContent).join('')):[];
+  const stx=await read('xl/styles.xml'); let dateXf=new Set();
+  if (stx){ const sd=xml(stx), custom={}; tags(sd,'numFmt').forEach(n=>{ custom[n.getAttribute('numFmtId')]=n.getAttribute('formatCode'); });
+    const xfs=sd.getElementsByTagName('cellXfs')[0]; if (xfs) tags(xfs,'xf').forEach((x,i)=>{ const id=+x.getAttribute('numFmtId'), fc=custom[id];
+      if ((id>=14&&id<=22)||(id>=45&&id<=47)||(fc&&/[dmy]/i.test(fc.replace(/\[[^\]]*\]|"[^"]*"/g,'')))) dateXf.add(i); }); }
+  const colIdx=ref=>{ const m=ref.match(/^[A-Z]+/)[0]; let c=0; for (const ch of m) c=c*26+ch.charCodeAt(0)-64; return c-1; };
+  const parse=async sh=>{
+    const d=xml(await read(sh.path)||''), rows=[];
+    tags(d,'row').forEach(r=>{ const ri=(+r.getAttribute('r')||rows.length+1)-1, row=rows[ri]=rows[ri]||[];
+      tags(r,'c').forEach((c,ci)=>{ const ref=c.getAttribute('r'), j=ref?colIdx(ref):ci, t=c.getAttribute('t'), v=c.getElementsByTagName('v')[0]?.textContent;
+        let val='';
+        if (t==='s') val=ss[+v]??''; else if (t==='inlineStr') val=tags(c,'t').map(x=>x.textContent).join(''); else if (t==='b') val=v==='1'?'TRUE':'FALSE';
+        else if (t==='str'||t==='e') val=v??''; else if (v!=null){ const num=+v;
+          if (dateXf.has(+c.getAttribute('s')) && Number.isFinite(num)){ const dt=new Date(Math.round((num-25569)*864e5)); val=dt.toISOString().slice(0, num%1?16:10).replace('T',' '); }
+          else val=String(+num.toPrecision(15)); }
+        row[j]=val; }); });
+    return [...rows].map(r=>r?Array.from(r,v=>v??''):[]).filter(r=>r.some(v=>String(v).trim()!==''));
+  };
+  return {sheets, parse};
+}
+function consortSVG(o){
+  const W=640, bx=(x,y,w,h,lines,cls='cb')=>`<rect class="${cls}" x="${x}" y="${y}" width="${w}" height="${h}" rx="4"/>`+lines.map((l,i)=>`<text x="${x+(cls==='cb'?w/2:10)}" y="${y+18+i*15}" text-anchor="${cls==='cb'?'middle':'start'}"${i===0&&l.bold?' style="font-weight:700"':''}>${esc(l.t??l)}</text>`).join('');
+  const arr=(x1,y1,x2,y2)=>`<path class="ca" d="M${x1},${y1}L${x2},${y2}"/><path class="ca2" d="M${x2-4},${y2-7}L${x2},${y2}L${x2+4},${y2-7}"/>`;
+  const harr=(x1,y,x2)=>`<path class="ca" d="M${x1},${y}H${x2}"/><path class="ca2" d="M${x2-7},${y-4}L${x2},${y}L${x2-7},${y+4}"/>`;
+  const pill=(y,t)=>`<rect class="cp" x="${W/2-60}" y="${y}" width="120" height="22" rx="11"/><text x="${W/2}" y="${y+15}" text-anchor="middle" style="font-weight:700">${t}</text>`;
+  const ex=o.exReasons.filter(r=>r[1]>0), exN=sum(ex.map(r=>r[1]));
+  let g=`<text class="ttl" x="${W/2}" y="18" text-anchor="middle">CONSORT flow diagram</text>`;
+  g+=pill(30,'Enrollment')+bx(W/2-110,62,220,30,[`Assessed for eligibility (n=${o.assessed})`]);
+  const exH=24+ex.length*15; g+=`<path class="ca" d="M${W/2},92V${118+exH/2}"/>`+harr(W/2,118+exH/2,W/2+70)+bx(W/2+70,110,250,exH,[{t:`Excluded (n=${exN})`,bold:true},...ex.map(r=>`• ${r[0]} (n=${r[1]})`)],'cl');
+  const ry=Math.max(160,118+exH+14); g+=arr(W/2,92,W/2,ry)+bx(W/2-90,ry,180,30,[`Randomized (n=${o.randomized})`]);
+  const y2=ry+44; g+=pill(y2,'Allocation');
+  const cols=[W*0.25,W*0.75], bw=270;
+  g+=`<path class="ca" d="M${W/2},${ry+30}V${y2-6}"/><path class="ca" d="M${cols[0]},${y2+11}H${W/2-60}M${W/2+60},${y2+11}H${cols[1]}"/>`;
+  const sec=(y,label,fn,h)=>{ let s=pill(y,label); cols.forEach((cx,k)=>{ s+=bx(cx-bw/2,y+32,bw,h,fn(k)); }); return s; };
+  const y3=y2+28; g+=cols.map(cx=>arr(cx,y2+11,cx,y3+4)).join('');
+  g+=cols.map((cx,k)=>bx(cx-bw/2,y3+4,bw,62,[{t:`Allocated to ${o.groups[k]} (n=${o.alloc[k]})`,bold:true},`Received allocated intervention (n=${o.alloc[k]-o.notRec[k]})`,`Did not receive intervention (n=${o.notRec[k]})`])).join('');
+  const y4=y3+80; g+=cols.map(cx=>arr(cx,y3+66,cx,y4+32)).join('')+sec(y4,'Follow-Up',k=>[`Lost to follow-up (n=${o.lost[k]})`,`Discontinued intervention (n=${o.disc[k]})`],44);
+  const y5=y4+92; g+=cols.map(cx=>arr(cx,y4+76,cx,y5+32)).join('')+sec(y5,'Analysis',k=>[{t:`Analysed (n=${o.alloc[k]-o.lost[k]-o.disc[k]-o.exAn[k]})`,bold:true},`Excluded from analysis (n=${o.exAn[k]})`],44);
+  return `<svg class="plot consort" viewBox="0 0 ${W} ${y5+84}" role="img">${g}</svg>`;
 }
 function buildDesign(rows, xs, ok){ // dummy-codes text predictors (first level = reference)
   const isN=xs.map(colIsNum), S=xs.map((j,k)=>rows.map(r=>isN[k]?toNum(r[j]):(isMiss(r[j])?null:String(r[j]).trim())));
@@ -1549,35 +1679,50 @@ pca:{ g:'Multivariate', name:'Principal component analysis',
     return out+`<div class="plots">${lineSVG(values.map((_,i)=>i+1),[values],{xlab:'Component',ylab:'Eigenvalue',title:'Scree plot',hline:1,ymin:0})}</div>`;
   }},
 power:{ g:'Planning', name:'Power & sample size', noData:true,
-  fields:[{k:'test',t:'select',label:'Test',options:[['t2','Independent-samples t-test'],['t1','One-sample or paired t-test'],['r','Correlation (Pearson r)']]},
+  fields:[{k:'test',t:'select',label:'Study design / test',options:[['t2','Two independent means (t-test)'],['t1','Paired / one-sample mean (t-test)'],['p2','Two independent proportions (chi-square)'],['anova','Several group means (one-way ANOVA)'],['r','Correlation (Pearson r)']]},
     {k:'solve',t:'select',label:'Calculate',options:[['n','Required sample size'],['power','Power for a given sample size']]},
-    {k:'es',t:'number',label:"Effect size (Cohen's d; r for correlation)",def:0.5},
+    {k:'es',t:'number',label:"Effect size — Cohen's d (t-tests), f (ANOVA) or r (correlation)",def:0.5},
+    {k:'p1',t:'number',label:'Two proportions: expected proportion in group 1',def:0.6},{k:'p2',t:'number',label:'Two proportions: expected proportion in group 2',def:0.4},
+    {k:'k',t:'number',label:'ANOVA: number of groups',def:3},
     {k:'alpha',t:'number',label:'Significance level (α)',def:0.05},
-    {k:'tails',t:'select',label:'Tails',options:[['2','Two-sided'],['1','One-sided']]},
+    {k:'tails',t:'select',label:'Tails (t-tests, proportions, correlation)',options:[['2','Two-sided'],['1','One-sided']]},
     {k:'pw',t:'number',label:'Target power (when calculating sample size)',def:0.8},
-    {k:'n',t:'number',label:'Sample size — per group for independent t (when calculating power)',def:30}],
+    {k:'n',t:'number',label:'Sample size per group (total N for paired / correlation) — when calculating power',def:30},
+    {k:'drop',t:'number',label:'Expected dropout rate (%)',def:10}],
   run(o){
-    const es=Math.abs(o.es??0), a=o.alpha, tails=+o.tails, isR=o.test==='r';
-    need(es>0,'Effect size must be non-zero.'); need(!isR||es<1,'r must be between −1 and 1.'); need(a>0&&a<0.5,'α must be between 0 and 0.5.');
+    const T=o.test, es=Math.abs(o.es??0), a=o.alpha, tails=T==='anova'?2:+o.tails, K=Math.round(o.k||3), drop=Math.max(0,Math.min(90,o.drop||0));
+    need(a>0&&a<0.5,'α must be between 0 and 0.5.');
+    if (T==='p2') need(o.p1>0&&o.p1<1&&o.p2>0&&o.p2<1&&o.p1!==o.p2,'Enter two different proportions between 0 and 1.');
+    else need(es>0,'Effect size must be non-zero.');
+    if (T==='r') need(es<1,'r must be between −1 and 1.'); if (T==='anova') need(K>=2,'Need at least 2 groups.');
+    const perGroup=T==='t2'||T==='p2'||T==='anova', minN=T==='r'?4:2;
     const pow=n=>{
-      if (isR){ if (n<4) return 0; const z=Math.atanh(es)*Math.sqrt(n-3), zc=normInv(1-a/tails); return tails===2?Phi(z-zc)+Phi(-z-zc):Phi(z-zc); }
-      const df=o.test==='t2'?2*n-2:n-1; if (df<1) return 0; const dl=es*Math.sqrt(o.test==='t2'?n/2:n);
+      if (T==='r'){ if (n<4) return 0; const z=Math.atanh(es)*Math.sqrt(n-3), zc=normInv(1-a/tails); return tails===2?Phi(z-zc)+Phi(-z-zc):Phi(z-zc); }
+      if (T==='p2'){ const p1=o.p1, p2=o.p2, pb=(p1+p2)/2, d=Math.abs(p1-p2), za=normInv(1-a/tails); return Phi((d*Math.sqrt(n)-za*Math.sqrt(2*pb*(1-pb)))/Math.sqrt(p1*(1-p1)+p2*(1-p2))); }
+      if (T==='anova'){ const d2=K*n-K; if (d2<1) return 0; return 1-ncfCdf(fInv(1-a,K-1,d2),K-1,d2,es*es*K*n); }
+      const df=T==='t2'?2*n-2:n-1; if (df<1) return 0; const dl=es*Math.sqrt(T==='t2'?n/2:n);
       if (tails===2){ const tc=tinv(1-a/2,df); return 1-nctcdf(tc,df,dl)+nctcdf(-tc,df,dl); }
       return 1-nctcdf(tinv(1-a,df),df,dl);
     };
     let n;
     if (o.solve==='n'){
       need(o.pw>a&&o.pw<1,'Target power must be between α and 1.');
-      let lo=isR?4:2, hi=lo; while (pow(hi)<o.pw){ lo=hi; hi*=2; need(hi<5e6,'Required sample size is too large.'); }
+      let lo=minN, hi=lo; while (pow(hi)<o.pw){ lo=hi; hi*=2; need(hi<5e6,'Required sample size is too large.'); }
       while (hi-lo>1){ const mid=Math.floor((lo+hi)/2); if (pow(mid)>=o.pw) hi=mid; else lo=mid; }
       n=pow(lo)>=o.pw?lo:hi;
-    } else { n=Math.round(o.n??0); need(n>=(isR?4:2),'Sample size is too small.'); }
-    const pw=pow(n), lab=o.test==='t2'?'n per group':'N', tot=o.test==='t2'?2*n:n;
-    const ns=[]; const top=Math.max(n*2,10); for (let i=0;i<=40;i++){ const v=Math.max(isR?4:2,Math.round(top*i/40)); if (!ns.includes(v)) ns.push(v); }
-    return table(['Test','Effect size','α','Tails',lab,'Total N','Power'],[[({t2:'Independent t',t1:'One-sample / paired t',r:'Correlation'})[o.test],f(es,3),a,tails,`<b>${n}</b>`,tot,`<b>${f(pw,4)}</b>`]])
-      + note(isR?'Uses the Fisher z approximation. Conventions: r = 0.1 small, 0.3 medium, 0.5 large.':"Exact power from the noncentral t distribution. Conventions: d = 0.2 small, 0.5 medium, 0.8 large.")
-      + `<div class="plots">${lineSVG(ns,[ns.map(pow)],{xlab:lab,ylab:'Power',title:'Power curve',hline:o.solve==='n'?o.pw:null,ymin:0,ymax:1,points:false})}</div>`
-      + report(o.solve==='n'?`To detect ${isR?'r':'d'} = ${f(es,2)} with ${Math.round(o.pw*100)}% power at α = ${a} (${tails===2?'two':'one'}-sided), you need ${lab} = ${n}${o.test==='t2'?` (total ${tot})`:''}.`:`With ${lab} = ${n}, power = ${f(pw,3)}.`);
+    } else { n=Math.round(o.n??0); need(n>=minN,'Sample size is too small.'); }
+    const groups=T==='t2'||T==='p2'?2:T==='anova'?K:1, tot=n*groups, pw=pow(n), nd=Math.ceil(n/(1-drop/100)), lab=perGroup?'n per group':'N';
+    const esTxt=T==='p2'?`proportions of ${o.p1} vs ${o.p2}`:T==='anova'?`f = ${f(es,2)}`:T==='r'?`r = ${f(es,2)}`:`d = ${f(es,2)}`;
+    const name={t2:'Independent t-test',t1:'Paired / one-sample t-test',p2:'Two proportions',anova:`One-way ANOVA (${K} groups)`,r:'Correlation'}[T];
+    const ns=[]; const top=Math.max(n*2,10); for (let i=0;i<=40;i++){ const v=Math.max(minN,Math.round(top*i/40)); if (!ns.includes(v)) ns.push(v); }
+    const testWord={t2:'an independent-samples t-test',t1:'a paired t-test',p2:'a chi-square test',anova:'a one-way ANOVA',r:'a test of Pearson correlation'}[T];
+    const para=o.solve==='n'
+      ? `Sample size was calculated using StatBench. A sample size of ${perGroup?`${n} participants per group (${tot} in total)`:`${n} participants`} achieves ${Math.round(o.pw*100)}% power to detect ${T==='p2'?`a difference between ${esTxt}`:`an effect size of ${esTxt}`} using ${testWord} at a ${tails===2||T==='anova'?'two':'one'}-sided significance level of ${a}.${drop>0?` To allow for an expected dropout rate of ${drop}%, ${perGroup?`${nd} participants per group (${nd*groups} in total)`:`${nd} participants`} will be recruited.`:''}`
+      : `With ${perGroup?`${n} participants per group (${tot} in total)`:`${n} participants`}, the study has ${f(100*pw,1)}% power to detect ${T==='p2'?`a difference between ${esTxt}`:`an effect size of ${esTxt}`} using ${testWord} at α = ${a}.`;
+    return table(['Design','Effect size','α','Tails',lab,'Total N','Power',...(drop>0?[`N with ${drop}% dropout`]:[])],[[name,esTxt,a,tails,`<b>${n}</b>`,tot,`<b>${f(pw,4)}</b>`,...(drop>0?[`${nd*groups}${perGroup?` (${nd} per group)`:''}`]:[])]])
+      + `<p class="para">${esc(para)}</p>`
+      + note({r:'Fisher z approximation. Conventions: r = 0.1 small, 0.3 medium, 0.5 large.',p2:'Normal approximation without continuity correction (Fleiss).',anova:"Exact power from the noncentral F distribution. Cohen's f: 0.10 small, 0.25 medium, 0.40 large.",t1:'Exact power from the noncentral t distribution. d = 0.2 small, 0.5 medium, 0.8 large.',t2:'Exact power from the noncentral t distribution. d = 0.2 small, 0.5 medium, 0.8 large.'}[T])
+      + `<div class="plots">${lineSVG(ns,[ns.map(pow)],{xlab:lab,ylab:'Power',title:'Power curve',hline:o.solve==='n'?o.pw:null,ymin:0,ymax:1,points:false})}</div>`;
   }},
 outliers:{ g:'Describe', name:'Outlier detection',
   fields:[{k:'x',t:'num',label:'Variable'},{k:'alpha',t:'number',label:"Grubbs' test significance level",def:0.05}],
@@ -1831,6 +1976,7 @@ table1:{ g:'Reports', name:'Group comparison table', report:true,
     {k:'mode',t:'select',label:'Numeric variables',options:[['auto','Auto — Shapiro–Wilk decides (normal → mean ± SD, otherwise median & IQR)'],['param','Always mean ± SD (t-test / ANOVA)'],['nonpar','Always median & IQR (Mann–Whitney / Kruskal–Wallis)']]},
     {k:'layout',t:'select',label:'Layout',options:[['stacked','Stacked — statistic rows under each variable (like a demographics table)'],['wide','One row per variable — e.g. repeated time points']]},
     {k:'title',t:'text',label:'Table title',def:'Demographic data of the studied groups'},
+    {k:'within',t:'check',label:'Time-point layout: add within-group P value across time points',def:true},
     {k:'text',t:'check',label:'Write results paragraphs',def:true},{k:'methods',t:'check',label:'Add statistical analysis (methods) paragraph',def:true},{k:'figs',t:'check',label:'Add figures',def:true}],
   run(o){
     const vars=o.vars.filter(j=>j!==o.g); need(vars.length,'Select at least one variable to compare.');
@@ -1872,6 +2018,13 @@ table1:{ g:'Reports', name:'Group comparison table', report:true,
         else it.L.forEach((c,i)=>{ T+=`<tr><th>${cname(it.j)}: ${esc(c)}</th>${lv.map((_,k)=>`<td colspan="2">${it.O[i][k]} (${nf(it.tot[k]?100*it.O[i][k]/it.tot[k]:NaN)}%)</td>`).join('')}${i?'':`<td rowspan="${it.L.length}">${pc(it.p)}</td>`}</tr>`; });
       });
     }
+    let wp=null;
+    if (wide && o.within && items.length>=2 && items.every(it=>it.kind==='num')){
+      const np=items[0].np, cols=items.map(it=>numCol(it.j));
+      wp=lv.map(L=>{ const M=G.map((g,i)=>g===L&&cols.every(c=>Number.isFinite(c[i]))?cols.map(c=>c[i]):null).filter(Boolean); return M.length>=3?(np?friedmanP(M):rmAnovaP(M)):NaN; });
+      used.add(np?'friedman':'rm');
+      T+=`<tr><th>P (within group)</th>${wp.map(p=>`<td colspan="2">${pc(p)}</td>`).join('')}<td></td></tr>`;
+    }
     T+='</tbody></table>';
     const pres=[]; if (items.some(i=>i.kind==='num'&&!i.np)) pres.push('mean ± SD and range'); if (items.some(i=>i.kind==='num'&&i.np)) pres.push(wide?'median and interquartile range (IQR)':'median (IQR) and range'); if (items.some(i=>i.kind==='cat')) pres.push('frequency (%)');
     let out='<div class="noheading" hidden></div>';
@@ -1880,10 +2033,11 @@ table1:{ g:'Reports', name:'Group comparison table', report:true,
       if (used.has('t')||used.has('anova')) m.push(`Quantitative parametric variables were presented as mean and standard deviation (SD) and compared between the ${two?'two groups utilizing unpaired Student\'s t-test':'groups utilizing one-way analysis of variance (ANOVA)'}.`);
       if (used.has('mw')||used.has('kw')) m.push(`Quantitative non-parametric data were presented as median and interquartile range (IQR) and were analyzed by ${two?'Mann–Whitney U test':'Kruskal–Wallis test'}.`);
       if (used.has('chi')||used.has('fisher')) m.push(`Qualitative variables were presented as frequency and percentage (%) and were analyzed utilizing the ${used.has('fisher')?'Chi-square test or Fisher\'s exact test when appropriate':'Chi-square test'}.`);
+      if (used.has('friedman')||used.has('rm')) m.push(`Comparisons within the same group across time points were performed using ${used.has('friedman')?'the Friedman test':'repeated-measures ANOVA with Greenhouse–Geisser correction'}.`);
       m.push('A two tailed P value < 0.05 was considered statistically significant.');
       out+=`<h5>Statistical analysis</h5><p class="para">Statistical analysis was done by StatBench. ${m.join(' ')}</p>`;
     }
-    out+=`<p class="caption">Table: ${esc(o.title||'Comparison of the studied groups')}</p>${T}<p class="note">*: Significant as P value ≤ 0.05. Data are presented as ${pres.join(', ')}.</p>`;
+    out+=`<p class="caption">Table: ${esc(o.title||'Comparison of the studied groups')}</p>${T}<p class="note">*: Significant as P value ≤ 0.05. Data are presented as ${pres.join(', ')}.${wp?` P (within group): ${used.has('friedman')?'Friedman test':'repeated-measures ANOVA'} across time points.`:''}</p>`;
     if (o.text){
       const nice=j=>{ const s=D.cols[j].replace(/_/g,' ').replace(/\s*\([^)]*\)\s*$/,'').trim(); return /^[A-Z][a-z]/.test(s)?s[0].toLowerCase()+s.slice(1):s; };
       const unit=j=>{ const m=D.cols[j].match(/\(([^)]*)\)\s*$/); return m?' '+m[1]:''; };
@@ -1902,6 +2056,7 @@ table1:{ g:'Reports', name:'Group comparison table', report:true,
       if (wide && items.length>1 && items.every(it=>it.kind==='num')){ // one combined sentence, as in journal reports
         const np=items[0].np, lst=k=>items.map(it=>{ const S=it.S[k]; return !S.n?'—':np?`${nf(S.median)} (${nf(S.q1)}-${nf(S.q3)})`:`${nf(S.mean)} (±${nf(S.sd)})`; }).join(', ');
         P.length=0; P.push(`The ${np?'median (IQR)':'mean (± SD)'} was ${andJ(lv.map((L,k)=>`${lst(k)} in ${L}`))} at ${andJ(items.map(it=>D.cols[it.j]))} respectively.`); }
+      if (wp) lv.forEach((L,k)=>{ if (Number.isFinite(wp[k])) sig.push(`Within ${L}, the values ${wp[k]<=0.05?'changed significantly':'did not change significantly'} across time points (P value ${pw(wp[k])}).`); });
       if (ins.length) P.push(`${cap(andJ(ins))} ${ins.length>1?'were':'was'} insignificantly different between ${two?'both':'the'} groups.`);
       out+=P.map(t=>`<p class="para">${esc(t)}</p>`).join('')+sig.map(t=>`<p class="para">${esc(t)}</p>`).join('');
     }
@@ -1918,6 +2073,104 @@ table1:{ g:'Reports', name:'Group comparison table', report:true,
       out+=`<div class="plots">${F}</div>`;
     }
     return out;
+  }},
+mixed:{ g:'Compare means', name:'Mixed ANOVA (group × time)',
+  fields:[{k:'g',t:'col',label:'Between-subjects factor (group)',prefCat:true},{k:'vars',t:'nums',label:'Repeated measurements (one column per time point, ≥ 2)'},{k:'post',t:'check',label:'Compare groups at each time point (Bonferroni)',def:true}],
+  run(o){
+    need(o.vars.length>=2,'Select at least 2 time-point columns.');
+    const G=strCol(o.g), C=o.vars.map(numCol), k=C.length;
+    const idx=G.map((_,i)=>i).filter(i=>G[i]!=null&&C.every(c=>Number.isFinite(c[i])));
+    const lv=sortLevels([...new Set(idx.map(i=>G[i]))]), a=lv.length; need(a>=2,'Need at least 2 groups.');
+    const M=lv.map(L=>idx.filter(i=>G[i]===L).map(i=>C.map(c=>c[i]))); need(M.every(m=>m.length>=2),'Each group needs at least 2 complete cases.');
+    const N=sum(M.map(m=>m.length)), all=M.flat(2), gm=mean(all);
+    const sst=sum(all.map(v=>(v-gm)**2)), sss=k*sum(M.flat().map(r=>(mean(r)-gm)**2));
+    const ssg=k*sum(M.map(m=>m.length*(mean(m.flat())-gm)**2));
+    const tm=o.vars.map((_,t)=>mean(M.flat().map(r=>r[t]))), sstime=N*sum(tm.map(v=>(v-gm)**2));
+    const sscell=sum(M.map(m=>m.length*sum(o.vars.map((_,t)=>(mean(m.map(r=>r[t]))-gm)**2))));
+    const ssint=sscell-ssg-sstime, sseb=sss-ssg, ssew=sst-sss-sstime-ssint;
+    const dfg=a-1, dfeb=N-a, dft=k-1, dfi=(a-1)*(k-1), dfew=(N-a)*(k-1);
+    const Fg=(ssg/dfg)/(sseb/dfeb), Ft=(sstime/dft)/(ssew/dfew), Fi=(ssint/dfi)/(ssew/dfew);
+    const Sp=o.vars.map((_,x)=>o.vars.map((_,y)=>sum(M.map(m=>{ const mx=mean(m.map(r=>r[x])), my=mean(m.map(r=>r[y])); return sum(m.map(r=>(r[x]-mx)*(r[y]-my))); }))/(N-a)));
+    const {gg}=sphericityEps(Sp,k,N-a+1);
+    const row=(nm,ss,df,F,eta,edf)=>[nm,f(ss),df,f(ss/df),F==null?'':f(F),F==null?'':P(fUpper(F,df,edf)),eta==null?'':f(eta)];
+    const tl=`Time`, il=`Time × ${cname(o.g)}`;
+    const rows=[row(cname(o.g),ssg,dfg,Fg,ssg/(ssg+sseb),dfeb),row('Error (between)',sseb,dfeb,null,null),
+      row(tl,sstime,dft,Ft,sstime/(sstime+ssew),dfew),row(il,ssint,dfi,Fi,ssint/(ssint+ssew),dfew),row('Error (within)',ssew,dfew,null,null)];
+    let out=h5('Descriptives (mean ± SD)')+table([cname(o.g),'N',...o.vars.map(cname)],lv.map((L,g)=>[esc(L),M[g].length,...o.vars.map((_,t)=>{ const v=M[g].map(r=>r[t]); return `${f(mean(v),2)} ± ${f(sd(v),2)}`; })]))
+      + h5('ANOVA (sphericity assumed)')+table(['Source','Sum of squares','df','Mean square','F','p','Partial η²'],rows);
+    if (k>2){ const pT_=fUpper(Ft,dft*gg,dfew*gg), pI=fUpper(Fi,dfi*gg,dfew*gg);
+      out+=h5(`Greenhouse–Geisser corrected within-subject effects (ε = ${f(gg)})`)+table(['Source','df','Error df','F','p'],[[tl,f(dft*gg,2),f(dfew*gg,2),f(Ft),P(pT_)],[il,f(dfi*gg,2),f(dfew*gg,2),f(Fi),P(pI)]]); }
+    if (o.post){ const pr=o.vars.map((j,t)=>{ const arrs=M.map(m=>m.map(r=>r[t])); const p=a===2?studentP(arrs[0],arrs[1]):anova1(arrs).p; return [cname(j),...arrs.map(v=>`${f(mean(v),2)} ± ${f(sd(v),2)}`),fp(p),P(Math.min(1,p*k))]; });
+      out+=h5(`Group comparison at each time point (${a===2?'t-test':'one-way ANOVA'})`)+table(['Time point',...lv.map(esc),'p','p (Bonferroni)'],pr); }
+    const pi=fUpper(Fi,dfi*(k>2?gg:1),dfew*(k>2?gg:1));
+    if (pi<0.05) out+=warn('The group × time interaction is significant: the groups change differently over time, so interpret main effects with care.');
+    return out+`<div class="plots">${meansSVG(o.vars.map(j=>D.cols[j]),lv.map((L,g)=>({name:L,pts:o.vars.map((_,t)=>meanCI(M[g].map(r=>r[t])))})),{title:'Means over time (± 95% CI)'})}</div>`
+      + note(`${AR().length-N} rows with missing values excluded. Partial η² = SS(effect) / (SS(effect) + SS(error)).`)
+      + report(`Group: F(${dfg}, ${dfeb}) = ${f(Fg,2)}, p ${pAPA(fUpper(Fg,dfg,dfeb))}; time: F = ${f(Ft,2)}, p ${pAPA(fUpper(Ft,dft*(k>2?gg:1),dfew*(k>2?gg:1)))}; interaction: F = ${f(Fi,2)}, p ${pAPA(pi)}`);
+  }},
+cox:{ g:'Survival', name:'Cox regression (hazard ratios)',
+  fields:[{k:'t',t:'num',label:'Time variable'},{k:'e',t:'col',label:'Status variable'},{k:'ev',t:'level',of:'e',label:'Event value (others = censored)'},{k:'xs',t:'cols',label:'Predictors (text columns are dummy-coded)'}],
+  run(o){
+    const xs=o.xs.filter(j=>j!==o.t&&j!==o.e); need(xs.length,'Select at least one predictor.');
+    const rows=AR(), T=numCol(o.t), E=strCol(o.e), {idx,terms,X}=buildDesign(rows,xs,i=>Number.isFinite(T[i])&&T[i]>=0&&E[i]!=null);
+    const Xd=X.map(r=>r.slice(1)), t=idx.map(i=>T[i]), ev=idx.map(i=>E[i]===o.ev), d=sum(ev.map(Number)), p=Xd[0]?.length||0;
+    need(d>=2,'Need at least 2 events.'); need(idx.length>p+1,'Not enough complete cases.');
+    const M=coxFit(t,ev,Xd); need(M,'The model could not be fitted (collinear predictors).');
+    const z=1.959964, lr=2*(M.ll-M.ll0), plr=chiUpper(lr,p);
+    const coef=M.b.map((b,c)=>{ const se=Math.sqrt(M.inv[c][c]), w=b/se; return [terms[c+1],f(b),f(se),f(w),P(pZ(w,'two')),`<b>${f(Math.exp(b))}</b>`,ci([Math.exp(b-z*se),Math.exp(b+z*se)])]; });
+    let out=table(['N','Events','Censored','−2 log partial likelihood','LR χ²','df','p','Concordance (C)'],[[idx.length,d,idx.length-d,f(-2*M.ll),f(lr),p,P(plr),f(M.C)]])
+      + h5('Coefficients')+table(['Term','B','SE','z','p','Hazard ratio','95% CI (HR)'],coef)
+      + note(`Event = "${esc(o.ev)}". Breslow method for ties. HR > 1 means a higher hazard (shorter survival) per unit increase or compared with the reference category. ${rows.length-idx.length} rows excluded for missing values.`);
+    if (!M.conv) out+=warn('The model did not fully converge — estimates may be unreliable (e.g. a category with no events).');
+    return out+report(`LR χ²(${p}) = ${f(lr,2)}, p ${pAPA(plr)}; C = ${f(M.C,2)}`);
+  }},
+ortable:{ g:'Reports', name:'Odds ratio table (univariable & multivariable)', report:true,
+  fields:[{k:'y',t:'col',label:'Outcome variable',prefCat:true,nth:1},{k:'ev',t:'level',of:'y',label:'Outcome event (coded 1)'},{k:'xs',t:'cols',label:'Candidate predictors'},
+    {k:'enter',t:'select',label:'Enter into the multivariable model',options:[['0.05','Predictors with univariable p < 0.05'],['0.1','Predictors with univariable p < 0.10'],['0.2','Predictors with univariable p < 0.20'],['1','All predictors']]},
+    {k:'title',t:'text',label:'Table title',def:'Univariable and multivariable logistic regression for predictors of the outcome'},{k:'text',t:'check',label:'Write results paragraph',def:true}],
+  run(o){
+    const xs=o.xs.filter(j=>j!==o.y); need(xs.length,'Select at least one predictor.');
+    const rows=AR(), Ys=strCol(o.y), z=1.959964, thr=+o.enter;
+    const fitFor=js=>{ const {idx,terms,X}=buildDesign(rows,js,i=>Ys[i]!=null); const y=idx.map(i=>Ys[i]===o.ev?1:0);
+      if (idx.length<=terms.length || !sum(y) || sum(y)===y.length) return null; const M=logitFit(X,y); return M?{M,terms,n:idx.length}:null; };
+    const orc=(M,c)=>{ const b=M.b[c], se=Math.sqrt(M.inv[c][c]); return {or:Math.exp(b), lo:Math.exp(b-z*se), hi:Math.exp(b+z*se), p:pZ(b/se,'two')}; };
+    const uni=new Map(), keep=[];
+    for (const j of xs){ const F=fitFor([j]); if (!F) continue; const res=F.terms.slice(1).map((t,c)=>({term:t,...orc(F.M,c+1)}));
+      const pmin=Math.min(...res.map(r=>r.p)); uni.set(j,res); if (pmin<thr) keep.push(j); }
+    need(uni.size,'No predictor could be fitted (check that the outcome has both values).');
+    const MV=keep.length?fitFor(keep):null, mv=new Map(); if (MV) MV.terms.slice(1).forEach((t,c)=>mv.set(t,orc(MV.M,c+1)));
+    const cell=r=>r?`${f(r.or,2)} (${f(r.lo,2)} - ${f(r.hi,2)})`:'—', pc=r=>!r?'—':r.p<=0.05?`<b>${r.p<0.001?'<0.001*':r.p.toFixed(3)+'*'}</b>`:r.p.toFixed(3);
+    let T='<table class="rpt"><thead><tr><th rowspan="2"></th><th colspan="2">Univariable</th><th colspan="2">Multivariable</th></tr><tr><th>OR (95% CI)</th><th>P value</th><th>OR (95% CI)</th><th>P value</th></tr></thead><tbody>';
+    for (const j of xs){ const res=uni.get(j); if (!res) continue;
+      if (colIsNum(j)){ const r=res[0], m=mv.get(r.term); T+=`<tr><th>${cname(j)}</th><td>${cell(r)}</td><td>${pc(r)}</td><td>${cell(m)}</td><td>${pc(m)}</td></tr>`; }
+      else { const ref=sortLevels([...new Set(strCol(j).filter((v,i)=>v!=null&&Ys[i]!=null))])[0];
+        T+=`<tr><th>${cname(j)}: ${esc(ref)}</th><td>Reference</td><td></td><td>${keep.includes(j)?'Reference':'—'}</td><td></td></tr>`;
+        res.forEach(r=>{ const m=mv.get(r.term); T+=`<tr><th>${r.term.replace(/ \[(.*)\]$/,': $1')}</th><td>${cell(r)}</td><td>${pc(r)}</td><td>${cell(m)}</td><td>${pc(m)}</td></tr>`; }); }
+    }
+    T+='</tbody></table>';
+    let out=`<div class="noheading" hidden></div><p class="caption">Table: ${esc(o.title)}</p>${T}<p class="note">OR: odds ratio, CI: confidence interval. *: Significant as P value ≤ 0.05. Outcome = "${esc(o.ev)}". ${thr<1?`Predictors with univariable P < ${thr} were entered into the multivariable model`:'All predictors were entered into the multivariable model'}${MV?` (n = ${MV.n})`:''}.</p>`;
+    if (o.text){
+      const sigU=[], sigM=[];
+      for (const j of xs){ (uni.get(j)||[]).forEach(r=>{ const nm=r.term.replace(/ \[(.*)\]$/,' ($1)'); if (r.p<=0.05) sigU.push(`${nm} (OR = ${f(r.or,2)}, 95% CI ${f(r.lo,2)}–${f(r.hi,2)}, P ${r.p<0.001?'< 0.001':'= '+r.p.toFixed(3)})`); const m=mv.get(r.term); if (m&&m.p<=0.05) sigM.push(`${nm} (adjusted OR = ${f(m.or,2)}, 95% CI ${f(m.lo,2)}–${f(m.hi,2)}, P ${m.p<0.001?'< 0.001':'= '+m.p.toFixed(3)})`); }); }
+      const ev=esc(`${D.cols[o.y]} = ${o.ev}`), joinA=a=>a.length<2?a.join(''):a.slice(0,-1).join(', ')+' and '+a[a.length-1];
+      out+=`<p class="para">${sigU.length?`In univariable logistic regression, ${esc(joinA(sigU))} ${sigU.length>1?'were':'was'} significantly associated with ${ev}.`:`No predictor was significantly associated with ${ev} in univariable analysis.`}</p>`;
+      if (MV) out+=`<p class="para">${sigM.length?`In the multivariable model, ${esc(joinA(sigM))} remained ${sigM.length>1?'independent predictors':'an independent predictor'} of ${ev}.`:`No predictor remained significant in the multivariable model.`}</p>`;
+    }
+    return out;
+  }},
+consort:{ g:'Reports', name:'CONSORT flow diagram', noData:true, report:true,
+  fields:[{k:'assessed',t:'number',label:'Assessed for eligibility',def:136},{k:'ex1',t:'number',label:'Excluded — not meeting inclusion criteria',def:18},{k:'ex2',t:'number',label:'Excluded — declined to participate',def:8},{k:'ex3',t:'number',label:'Excluded — other reasons',def:0},
+    {k:'g1',t:'text',label:'Group 1 name',def:'Group I'},{k:'g2',t:'text',label:'Group 2 name',def:'Group II'},{k:'a1',t:'number',label:'Allocated to group 1',ph:'half of randomized'},{k:'a2',t:'number',label:'Allocated to group 2',ph:'rest of randomized'},
+    {k:'nr1',t:'number',label:'Group 1 — did not receive intervention',def:0},{k:'nr2',t:'number',label:'Group 2 — did not receive intervention',def:0},{k:'l1',t:'number',label:'Group 1 — lost to follow-up',def:0},{k:'l2',t:'number',label:'Group 2 — lost to follow-up',def:0},
+    {k:'d1',t:'number',label:'Group 1 — discontinued intervention',def:0},{k:'d2',t:'number',label:'Group 2 — discontinued intervention',def:0},{k:'e1',t:'number',label:'Group 1 — excluded from analysis',def:0},{k:'e2',t:'number',label:'Group 2 — excluded from analysis',def:0}],
+  run(o){
+    const N=x=>Math.max(0,Math.round(x||0)), assessed=N(o.assessed), ex=[['Not meeting inclusion criteria',N(o.ex1)],['Declined to participate',N(o.ex2)],['Other reasons',N(o.ex3)]];
+    const rnd=assessed-sum(ex.map(e=>e[1])); need(assessed>0&&rnd>0,'The number randomized (assessed − excluded) must be positive.');
+    const a1=o.a1!=null?N(o.a1):Math.ceil(rnd/2), a2=o.a2!=null?N(o.a2):rnd-a1; need(a1+a2===rnd,`Allocated (${a1} + ${a2}) must equal randomized (${rnd}).`);
+    const g=[o.g1||'Group I',o.g2||'Group II'], alloc=[a1,a2], lost=[N(o.l1),N(o.l2)], disc=[N(o.d1),N(o.d2)], exAn=[N(o.e1),N(o.e2)], an=alloc.map((v,k)=>v-lost[k]-disc[k]-exAn[k]);
+    need(an.every(v=>v>=0),'Lost + discontinued + excluded cannot exceed the number allocated.');
+    const txt=`In this study, ${assessed} patients were assessed for eligibility, ${ex.filter(e=>e[1]).map(e=>`${e[1]} ${e[0]==='Not meeting inclusion criteria'?'did not meet the criteria':e[0]==='Declined to participate'?'refused to participate in the study':'were excluded for other reasons'}`).join(' and ')||'none were excluded'}. The remaining ${rnd} patients were randomly allocated into two groups (${a1===a2?`${a1} patients in each`:`${a1} in ${g[0]} and ${a2} in ${g[1]}`}). ${lost[0]+lost[1]+disc[0]+disc[1]+exAn[0]+exAn[1]===0?'All allocated patients were followed-up and analyzed statistically.':`${an[0]} patients in ${g[0]} and ${an[1]} patients in ${g[1]} were analyzed statistically.`}`;
+    return `<div class="noheading" hidden></div><p class="para">${esc(txt)}</p><div class="plots">${consortSVG({assessed,exReasons:ex,randomized:rnd,groups:g,alloc,notRec:[N(o.nr1),N(o.nr2)],lost,disc,exAn})}</div>`;
   }},
 };
 
@@ -2173,7 +2426,7 @@ function svgToPng(svg, scale=2){
   });
 }
 async function exportDocx(){
-  const cards=[...$('#results').children].reverse();
+  const cards=[...$('#results').children];
   if (!cards.length){ alert('There are no results to export yet.'); return; }
   const btn=$('#bWord'), label=btn.textContent; btn.disabled=true; btn.textContent='Building Word file…';
   const root=document.documentElement, prevTheme=root.dataset.theme; root.dataset.theme='light'; // charts in print colours
@@ -2231,10 +2484,11 @@ async function exportDocx(){
 function addResult(title, html, useData=true){
   const el=document.createElement('article'); el.className='card';
   const flt = useData && D.filter && MASK ? `Filter: <code>${esc(D.filter)}</code> (n = ${MASK.filter(Boolean).length}) · ` : '';
-  el.innerHTML=`<header><h3>${esc(title)}</h3><span class="meta">${flt}${new Date().toLocaleString()}</span><button class="copy" title="Copy tables as tab-separated text (paste into Excel/Word)">Copy</button><button class="x" title="Remove">×</button></header><div class="body">${html}</div>`;
+  el.innerHTML=`<header><h3>${esc(title)}</h3><span class="meta">${flt}${new Date().toLocaleString()}</span><button class="mv" data-d="-1" title="Move up">↑</button><button class="mv" data-d="1" title="Move down">↓</button><button class="copy" title="Copy tables as tab-separated text (paste into Excel/Word)">Copy</button><button class="x" title="Remove">×</button></header><div class="body">${html}</div>`;
   el.querySelectorAll('svg.plot').forEach(svg=>{ const w=document.createElement('div'); w.className='pw'; svg.replaceWith(w); w.append(svg);
     w.insertAdjacentHTML('beforeend','<div class="dlbar"><button class="dl" data-f="png" title="Download as PNG image">PNG</button><button class="dl" data-f="svg" title="Download as SVG vector image">SVG</button></div>'); });
-  $('#results').prepend(el); saveResults(); showTab('results'); window.scrollTo({top:0});
+  el.querySelectorAll('h3, h5, .caption, .para').forEach(n=>{ n.contentEditable='true'; n.spellcheck=true; });
+  $('#results').append(el); saveResults(); showTab('results'); el.scrollIntoView({block:'start'});
 }
 $('#results').addEventListener('click', e=>{
   if (e.target.matches('.card>header .x')){ e.target.closest('.card').remove(); saveResults(); }
@@ -2245,6 +2499,7 @@ $('#results').addEventListener('click', e=>{
       img.onload=()=>{ const c=document.createElement('canvas'); c.width=vb.width*sc; c.height=vb.height*sc; const ctx=c.getContext('2d'); ctx.scale(sc,sc); ctx.drawImage(img,0,0); c.toBlob(b=>download(name+'.png',b)); };
       img.src='data:image/svg+xml;charset=utf-8,'+encodeURIComponent(str); }
   }
+  else if (e.target.matches('.card>header .mv')){ const c=e.target.closest('.card'), d=+e.target.dataset.d, o=d<0?c.previousElementSibling:c.nextElementSibling; if (o){ d<0?o.before(c):o.after(c); saveResults(); c.scrollIntoView({block:'nearest'}); } }
   else if (e.target.matches('.card>header .copy')){
     const card=e.target.closest('.card'), parts=[card.querySelector('h3').textContent];
     for (const el of card.querySelectorAll('.body > h5, .body > .caption, .body > table, .body > .para, .body > .note, .body > .report, .body > .warn')){
@@ -2256,13 +2511,15 @@ $('#results').addEventListener('click', e=>{
     if (navigator.clipboard) navigator.clipboard.writeText(txt).then(done,()=>alert('Clipboard not available.'));
   }
 });
+let resTimer;
+$('#results').addEventListener('input', ()=>{ clearTimeout(resTimer); resTimer=setTimeout(saveResults,500); });
 function saveResults(){ $('#rcount').textContent=$('#results').children.length||''; store.set('statbench.results', $('#results').innerHTML); }
 $('#bClearRes').onclick=()=>{ if ($('#results').children.length && confirm('Remove all results?')){ $('#results').innerHTML=''; saveResults(); } };
 $('#bPrint').onclick=()=>window.print();
 $('#bWord').onclick=()=>exportDocx();
 $('#bSaveRes').onclick=()=>{
   const css=document.querySelector('style').textContent, theme=document.documentElement.dataset.theme||'';
-  download('statbench-results.html', `<!doctype html><html lang="en"${theme?` data-theme="${theme}"`:''}><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>StatBench results</title><style>${css} main{max-width:980px;margin:0 auto}.card .x,.card .copy,.dlbar{display:none}</style></head><body><main><div id="results">${$('#results').innerHTML}</div></main></body></html>`, 'text/html');
+  download('statbench-results.html', `<!doctype html><html lang="en"${theme?` data-theme="${theme}"`:''}><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>StatBench results</title><style>${css} main{max-width:980px;margin:0 auto}.card .x,.card .copy,.card .mv,.dlbar{display:none}</style></head><body><main><div id="results">${$('#results').innerHTML}</div></main></body></html>`, 'text/html');
 };
 
 /* ================= Shell ================= */
